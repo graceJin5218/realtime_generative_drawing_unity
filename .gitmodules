@@ -1,0 +1,15 @@
+[submodule "Assets/StreamingAssets/models/sd-turbo"]
+	path = Assets/StreamingAssets/models/sd-turbo
+	url = https://huggingface.co/stabilityai/sd-turbo
+[submodule "Assets/StreamingAssets/models/kohaku-v2.1"]
+	path = Assets/StreamingAssets/models/kohaku-v2.1
+	url = https://huggingface.co/KBlueLeaf/kohaku-v2.1
+[submodule "Assets/StreamingAssets/models/taesd"]
+	path = Assets/StreamingAssets/models/taesd
+	url = https://huggingface.co/madebyollin/taesd
+[submodule "Assets/StreamingAssets/models/lcm-lora-sdv1-5"]
+	path = Assets/StreamingAssets/models/lcm-lora-sdv1-5
+	url = https://huggingface.co/latent-consistency/lcm-lora-sdv1-5
+[submodule "Assets/StreamingAssets/streamdiffusion"]
+	path = Assets/StreamingAssets/streamdiffusion
+	url = https://github.com/cumulo-autumn/StreamDiffusion
