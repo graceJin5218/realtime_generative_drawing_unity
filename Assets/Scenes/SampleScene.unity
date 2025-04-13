@@ -853,7 +853,7 @@ MonoBehaviour:
   _baseModelPath: ./models/kohaku-v2.1
   _tinyVaeModelPath: ./models/taesd
   _loraModelPath: ./models/lcm-lora-sdv1-5
-  _acceleration: xformers
+  _acceleration: tensorrt
   _width: 512
   _height: 512
   _seed: 34

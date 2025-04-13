@@ -19,3 +19,5 @@ https://github.com/cumulo-autumn/StreamDiffusion/blob/main/README.md#installatio
 4. Copy envrionment folder (e.g., <anaconda>/envs/streamdiffusion) to StreamAssets/envs/streamdiffusion
 
 5. Open SampleScene.unity and enjoy the risk on your own!
+When "Acceleration" is "tensorrt", the system will halt for a long time to generate native engine data. Please be patient.
+For Graphics cards with low memory, change "Acceleration" from "tensorrt" to "xformers" in Unity Inspector
