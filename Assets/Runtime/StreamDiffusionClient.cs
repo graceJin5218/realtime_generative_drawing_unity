@@ -214,12 +214,16 @@ public class StreamDiffusionClient : MonoBehaviour
             _backgroundProcess.OutputDataReceived += OutputDataReceived;
             _backgroundProcess.ErrorDataReceived += OutputDataReceived;
 
-            if (!_backgroundProcess.Start()) Debug.LogError("Failed to start the predictor");
+            if (!_backgroundProcess.Start())
+            {
+                Debug.LogError("Failed to start the image_predictor.py. Be sure to update submodules first");
+            }
             _backgroundProcess.BeginOutputReadLine();
             _backgroundProcess.BeginErrorReadLine();
         }
         else
-            Debug.LogError("Failed to find Python.exe");
+            Debug.LogError("Failed to find Python.exe. Please copy streamdiffusion environment " +
+                           "(e.g., <anaconda3/envs/streamdiffusion>) to <StreamAssets>/envs/streamdiffusion first");
         Invoke("StartTcpClient", 8.0f);
     }
 
