@@ -859,6 +859,7 @@ MonoBehaviour:
   _seed: 34
   _useTinyVae: 1
   _useLcmLora: 0
+  _showPythonConsole: 0
   _defaultPrompt: 1 girl
   _defaultNegativePrompt: low quality, bad quality, blurry, low resolution
   _resultMaterial: {fileID: 2100000, guid: 943e6c2cac3a6e64dbdb2dad70dbb0d6, type: 2}

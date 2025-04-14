@@ -14,7 +14,7 @@ public class StreamDiffusionClient : MonoBehaviour
     public string _acceleration = "tensorrt";
 
     public int _width = 512, _height = 512, _seed = 2;
-    public bool _useTinyVae = true, _useLcmLora = true;
+    public bool _useTinyVae = true, _useLcmLora = true, _showPythonConsole = false;
     public string _defaultPrompt = "1 girl with blue dog hair, smiling";
     public string _defaultNegativePrompt = "low quality, bad quality, blurry, low resolution";
 
@@ -44,7 +44,7 @@ public class StreamDiffusionClient : MonoBehaviour
             _client.Connect(_serverIP, _serverPort);
             _stream = _client.GetStream();
             _isRunning = true;
-            setModelPaths();
+            SetModelPaths();
 
             Thread receiveThread = new Thread(new ThreadStart(ReceiveMessages));
             receiveThread.IsBackground = true;
@@ -125,7 +125,7 @@ public class StreamDiffusionClient : MonoBehaviour
         }
     }
 
-    public void setModelPaths()
+    public void SetModelPaths()
     {
         string cmd0 = $"|start|command||paths||base_model||{_baseModelPath}||taesd_model||{_tinyVaeModelPath}"
                     + $"||lora_model||{_loraModelPath}||run||0|end|";
@@ -197,29 +197,39 @@ public class StreamDiffusionClient : MonoBehaviour
         if (System.IO.File.Exists(exePath))
         {
             Debug.Log("Start background server...");
-            System.Diagnostics.ProcessStartInfo startInfo = new System.Diagnostics.ProcessStartInfo(exePath)
+            System.Diagnostics.ProcessStartInfo startInfo = new System.Diagnostics.ProcessStartInfo(exePath);
+            startInfo.FileName = exePath;
+            startInfo.Arguments = "image_predictor.py";
+            startInfo.WorkingDirectory = $"{Application.streamingAssetsPath}";
+            if (_showPythonConsole)
             {
-                FileName = exePath,
-                Arguments = "image_predictor.py",
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                WindowStyle = System.Diagnostics.ProcessWindowStyle.Hidden,
-                WorkingDirectory = $"{Application.streamingAssetsPath}"
-            };
+                startInfo.UseShellExecute = true;
+                startInfo.WindowStyle = System.Diagnostics.ProcessWindowStyle.Normal;
+            }
+            else
+            {
+                startInfo.UseShellExecute = false;
+                startInfo.CreateNoWindow = true;
+                startInfo.RedirectStandardOutput = true;
+                startInfo.RedirectStandardError = true;
+                startInfo.WindowStyle = System.Diagnostics.ProcessWindowStyle.Hidden;
+            }
 
             _backgroundProcess = new System.Diagnostics.Process();
             _backgroundProcess.StartInfo = startInfo;
-            _backgroundProcess.OutputDataReceived += OutputDataReceived;
-            _backgroundProcess.ErrorDataReceived += OutputDataReceived;
+            if (!_showPythonConsole)
+            {
+                _backgroundProcess.OutputDataReceived += OutputDataReceived;
+                _backgroundProcess.ErrorDataReceived += OutputDataReceived;
+            }
 
             if (!_backgroundProcess.Start())
-            {
                 Debug.LogError("Failed to start the image_predictor.py. Be sure to update submodules first");
+            if (!_showPythonConsole)
+            {
+                _backgroundProcess.BeginOutputReadLine();
+                _backgroundProcess.BeginErrorReadLine();
             }
-            _backgroundProcess.BeginOutputReadLine();
-            _backgroundProcess.BeginErrorReadLine();
         }
         else
             Debug.LogError("Failed to find Python.exe. Please copy streamdiffusion environment " +
