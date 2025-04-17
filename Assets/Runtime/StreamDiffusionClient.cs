@@ -19,13 +19,16 @@ using UnityEngine;
 public class StreamDiffusionClient : MonoBehaviour
 {
     [Tooltip("基础模型路径，相对于StreamingAssets/models目录")]
-    public string _baseModelPath = "Model/photonLCM_v10.safetensors";
+    public string _baseModelPath = "Model/revAnimatedLCMfp16.safetensors";
 
     [Tooltip("VAE模型路径，相对于StreamingAssets/models目录")]
     public string _tinyVaeModelPath = "VAE";
 
-    [Tooltip("LoRA模型路径，相对于StreamingAssets/models目录")]
-    public string _loraModelPath = "LoRA/tbh123-.safetensors";
+    [Tooltip("第一个LoRA模型路径，相对于StreamingAssets/models目录")]
+    public string _loraModelPath = "";
+
+    [Tooltip("第二个LoRA模型路径，相对于StreamingAssets/models目录")]
+    public string _loraModelPath2 = "";
 
     [Tooltip("加速模式：tensorrt, cuda等")]
     public string _acceleration = "tensorrt";
@@ -45,10 +48,28 @@ public class StreamDiffusionClient : MonoBehaviour
     [Tooltip("是否使用LCM LoRA")]
     public bool _useLcmLora = true;
 
-    [Tooltip("LoRA强度")]
+    [Tooltip("第一个LoRA强度")]
     [Range(0.1f, 1.0f)]
     public float _loraScale = 0.85f;
 
+    [Tooltip("第二个LoRA强度")]
+    [Range(0.1f, 1.0f)]
+    public float _loraScale2 = 0.5f;
+
+    [Header("图像预处理参数")]
+    [Tooltip("亮度调整")]
+    [Range(0.5f, 3f)]
+    public float _brightness = 1.0f;
+
+    [Tooltip("对比度调整")]
+    [Range(0.5f, 1.5f)]
+    public float _contrast = 1.0f;
+
+    [Tooltip("饱和度调整")]
+    [Range(0.0f, 2.0f)]
+    public float _saturation = 1.0f;
+
+    [Space]
     [Tooltip("是否显示Python控制台")]
     public bool _showPythonConsole = false;
 
@@ -56,6 +77,34 @@ public class StreamDiffusionClient : MonoBehaviour
     [Range(1f, 3.0f)]
     public float _strength = 1.0f;
 
+    [Header("高级参数")]
+    [Tooltip("Delta参数，控制噪声添加量")]
+    [Range(0.1f, 1.0f)]
+    public float _delta = 0.8f;
+
+    [Tooltip("是否在每步添加噪声")]
+    public bool _doAddNoise = true;
+
+    [Tooltip("是否启用相似图像过滤")]
+    public bool _enableSimilarFilter = true;
+
+    [Tooltip("相似图像过滤阈值")]
+    [Range(0.1f, 0.99f)]
+    public float _similarThreshold = 0.6f;
+
+    [Tooltip("最大跳过帧数")]
+    [Range(1, 30)]
+    public int _maxSkipFrame = 10;
+
+    [Tooltip("引导尺度")]
+    [Range(0.1f, 10.0f)]
+    public float _guidanceScale = 1.0f;
+
+    [Space]
+    [Tooltip("绕过模式，直接返回输入图像而不经过AI处理")]
+    public bool _bypassMode = false;
+
+    [Space]
     [Tooltip("提示词")]
     public string _defaultPrompt = "";
 
@@ -222,18 +271,133 @@ public class StreamDiffusionClient : MonoBehaviour
 
             if (validEnd)
             {
+                Debug.Log($"接收到完整图像数据，大小: {_advancedData.Length} 字节");
+                
                 if (_resultTexture == null)
                 {
-                    _resultTexture = new Texture2D(2, 2);
+                    _resultTexture = new Texture2D(2, 2, TextureFormat.RGBA32, false, QualitySettings.activeColorSpace == ColorSpace.Linear);
+                    Debug.Log($"创建新的结果纹理，颜色空间：{QualitySettings.activeColorSpace}");
                     if (_resultMaterial != null)
+                    {
                         _resultMaterial.mainTexture = _resultTexture;
+                        Debug.Log("将新纹理分配给材质");
+                    }
+                    else
+                    {
+                        Debug.LogError("结果材质为空，无法分配纹理");
+                    }
                 }
 
-                if (_resultTexture.LoadImage(_advancedData))
-                    _resultTexture.Apply();
+                try
+                {
+                    // 记录图像数据的前20个字节，用于调试
+                    string dataPrefix = "";
+                    for (int i = 0; i < System.Math.Min(20, _advancedData.Length); i++)
+                    {
+                        dataPrefix += _advancedData[i].ToString("X2") + " ";
+                    }
+                    Debug.Log($"图像数据前缀: {dataPrefix}");
+                    
+                    // 验证图像格式
+                    bool isPng = (_advancedData.Length > 8 && 
+                        _advancedData[0] == 0x89 && _advancedData[1] == 0x50 && 
+                        _advancedData[2] == 0x4E && _advancedData[3] == 0x47);
+                    
+                    bool isJpeg = (_advancedData.Length > 3 && 
+                        _advancedData[0] == 0xFF && _advancedData[1] == 0xD8 && 
+                        _advancedData[2] == 0xFF);
+                    
+                    Debug.Log($"图像格式: {(isPng ? "PNG" : (isJpeg ? "JPEG" : "未知"))}");
+                    
+                    bool success = _resultTexture.LoadImage(_advancedData, !isPng); // 如果不是PNG，保留透明度
+                    Debug.Log($"加载图像{(success ? "成功" : "失败")}，宽度={_resultTexture.width}, 高度={_resultTexture.height}");
+                    
+                    if (success)
+                    {
+                        _resultTexture.Apply();
+                        
+                        // 检查图像的颜色
+                        Color[] pixels = _resultTexture.GetPixels();
+                        if (pixels.Length > 0)
+                        {
+                            float avgR = 0, avgG = 0, avgB = 0, avgA = 0;
+                            for (int i = 0; i < pixels.Length; i++)
+                            {
+                                avgR += pixels[i].r;
+                                avgG += pixels[i].g;
+                                avgB += pixels[i].b;
+                                avgA += pixels[i].a;
+                            }
+                            
+                            avgR /= pixels.Length;
+                            avgG /= pixels.Length;
+                            avgB /= pixels.Length;
+                            avgA /= pixels.Length;
+                            
+                            Debug.Log($"收到图像平均RGB值: R={avgR:F3}, G={avgG:F3}, B={avgB:F3}, A={avgA:F3}");
+                            
+                            // 检查是否是全黑图像
+                            if (avgR < 0.01f && avgG < 0.01f && avgB < 0.01f)
+                            {
+                                Debug.LogWarning("检测到全黑图像！创建测试色彩图案");
+                                
+                                // 创建一个测试图案替换黑色图像
+                                _resultTexture = new Texture2D(512, 512, TextureFormat.RGBA32, false, QualitySettings.activeColorSpace == ColorSpace.Linear);
+                                Color[] testPixels = new Color[512 * 512];
+                                
+                                for (int y = 0; y < 512; y++)
+                                {
+                                    for (int x = 0; x < 512; x++)
+                                    {
+                                        if (x < 170)
+                                            testPixels[y * 512 + x] = new Color(1, 0, 0, 1); // 红色区域
+                                        else if (x < 340)
+                                            testPixels[y * 512 + x] = new Color(0, 1, 0, 1); // 绿色区域
+                                        else
+                                            testPixels[y * 512 + x] = new Color(0, 0, 1, 1); // 蓝色区域
+                                    }
+                                }
+                                
+                                _resultTexture.SetPixels(testPixels);
+                                _resultTexture.Apply();
+                                
+                                if (_resultMaterial != null)
+                                {
+                                    _resultMaterial.mainTexture = _resultTexture;
+                                }
+                            }
+                        }
+                        else
+                        {
+                            Debug.LogError("纹理像素数组为空");
+                        }
+                    }
+                    else
+                    {
+                        Debug.LogError("图像加载到纹理失败");
+                        
+                        // 创建一个应急图像
+                        _resultTexture = new Texture2D(512, 512, TextureFormat.RGBA32, false, QualitySettings.activeColorSpace == ColorSpace.Linear);
+                        Color[] testPixels = new Color[512 * 512];
+                        for (int i = 0; i < testPixels.Length; i++)
+                        {
+                            testPixels[i] = new Color(1, 1, 0, 1); // 黄色
+                        }
+                        _resultTexture.SetPixels(testPixels);
+                        _resultTexture.Apply();
+                        if (_resultMaterial != null)
+                        {
+                            _resultMaterial.mainTexture = _resultTexture;
+                        }
+                    }
+                }
+                catch (System.Exception e)
+                {
+                    Debug.LogError($"处理图像数据时出错: {e.Message}");
+                }
+
                 _advancedData = null;
                 _isAdvancing = false;
-                //Debug.Log("Received image: " + len0);
             }
         }
         else
@@ -245,20 +409,113 @@ public class StreamDiffusionClient : MonoBehaviour
         }
     }
 
+    /// <summary>
+    /// 图像预处理，调整输入图像的亮度、对比度和饱和度
+    /// </summary>
+    public byte[] PreprocessImage(byte[] imageBytes, int width, int height)
+    {
+        if (imageBytes == null || imageBytes.Length == 0)
+            return imageBytes;
+        
+        // 创建纹理用于处理
+        Texture2D texture = new Texture2D(width, height, TextureFormat.RGB24, false);
+        Color32[] pixels = new Color32[width * height];
+        
+        // 将字节数组转换为Color32数组
+        for (int i = 0; i < width * height; i++)
+        {
+            int byteIndex = i * 3;
+            if (byteIndex + 2 < imageBytes.Length)
+            {
+                pixels[i] = new Color32(
+                    imageBytes[byteIndex],
+                    imageBytes[byteIndex + 1],
+                    imageBytes[byteIndex + 2],
+                    255
+                );
+            }
+        }
+        
+        // 应用预处理调整
+        for (int i = 0; i < pixels.Length; i++)
+        {
+            // 转换到线性空间进行处理
+            Color linearColor = new Color(
+                pixels[i].r / 255f,
+                pixels[i].g / 255f,
+                pixels[i].b / 255f
+            );
+            
+            // 亮度调整
+            linearColor *= _brightness;
+            
+            // 对比度调整 (先转到-0.5到0.5范围)
+            if (_contrast != 1f)
+            {
+                linearColor.r = (linearColor.r - 0.5f) * _contrast + 0.5f;
+                linearColor.g = (linearColor.g - 0.5f) * _contrast + 0.5f;
+                linearColor.b = (linearColor.b - 0.5f) * _contrast + 0.5f;
+            }
+            
+            // 饱和度调整
+            if (_saturation != 1f)
+            {
+                float luminance = linearColor.r * 0.3f + linearColor.g * 0.59f + linearColor.b * 0.11f;
+                linearColor.r = Mathf.Lerp(luminance, linearColor.r, _saturation);
+                linearColor.g = Mathf.Lerp(luminance, linearColor.g, _saturation);
+                linearColor.b = Mathf.Lerp(luminance, linearColor.b, _saturation);
+            }
+            
+            // 确保值在合法范围内
+            linearColor.r = Mathf.Clamp01(linearColor.r);
+            linearColor.g = Mathf.Clamp01(linearColor.g);
+            linearColor.b = Mathf.Clamp01(linearColor.b);
+            
+            // 转回Color32格式
+            pixels[i] = new Color32(
+                (byte)(linearColor.r * 255),
+                (byte)(linearColor.g * 255),
+                (byte)(linearColor.b * 255),
+                255
+            );
+        }
+        
+        // 转回字节数组
+        byte[] result = new byte[width * height * 3];
+        for (int i = 0; i < pixels.Length; i++)
+        {
+            int byteIndex = i * 3;
+            result[byteIndex] = pixels[i].r;
+            result[byteIndex + 1] = pixels[i].g;
+            result[byteIndex + 2] = pixels[i].b;
+        }
+        
+        return result;
+    }
+
     public void setModelPaths()
     {
         // 构建完整路径
         string fullBaseModelPath = GetFullModelPath(_baseModelPath);
         string fullVaePath = GetFullModelPath(_tinyVaeModelPath);
-        string fullLoraPath = GetFullModelPath(_loraModelPath);
+        
+        // 修复：即使是空路径也传递空字符串，而不是null
+        string fullLoraPath = string.IsNullOrEmpty(_loraModelPath) 
+            ? "" 
+            : GetFullModelPath(_loraModelPath);
+        
+        string fullLoraPath2 = string.IsNullOrEmpty(_loraModelPath2)
+            ? ""
+            : GetFullModelPath(_loraModelPath2);
 
         Debug.Log(
-            $"Sending paths to Python server: Base={fullBaseModelPath}, VAE={fullVaePath}, LoRA={fullLoraPath}"
+            $"Sending paths to Python server: Base={fullBaseModelPath}, VAE={fullVaePath}, LoRA1={fullLoraPath}, LoRA2={fullLoraPath2}"
         );
 
+        // 恢复使用原始参数名lora_model和lora_model2以匹配Python端
         string cmd0 =
             $"|start|command||paths||base_model||{fullBaseModelPath}||taesd_model||{fullVaePath}"
-            + $"||lora_model||{fullLoraPath}||run||0|end|";
+            + $"||lora_model||{fullLoraPath}||lora_model2||{fullLoraPath2}||run||0|end|";
         SendCommandToPython(cmd0);
     }
 
@@ -268,15 +525,25 @@ public class StreamDiffusionClient : MonoBehaviour
             lora = (_useLcmLora ? 1 : 0);
 
         Debug.Log(
-            $"准备发送参数到Python: 宽度={_width}, 高度={_height}, 种子={_seed}, 强度={_strength}, LoRA强度={_loraScale}"
+            $"准备发送参数到Python: 宽度={_width}, 高度={_height}, 种子={_seed}, 强度={_strength}, LoRA1强度={_loraScale}, LoRA2强度={_loraScale2}"
+        );
+        Debug.Log(
+            $"高级参数: Delta={_delta}, 添加噪声={_doAddNoise}, 相似图像过滤={_enableSimilarFilter}, 阈值={_similarThreshold}, 最大跳帧={_maxSkipFrame}"
+        );
+        Debug.Log(
+            $"引导尺度: {_guidanceScale}, 绕过模式: {_bypassMode}"
         );
 
         // 确保种子值作为字符串发送
         string seedStr = _seed.ToString();
 
+        // 恢复使用原始参数名lora_scale和lora_scale2，添加新参数
         string loadCmd =
             $"|start|command||load||width||{_width}||height||{_height}||seed||{seedStr}"
-            + $"||use_vae||{vae}||use_lora||{lora}||strength||{_strength}||lora_scale||{_loraScale}||acceleration||{_acceleration}"
+            + $"||use_vae||{vae}||use_lora||{lora}||strength||{_strength}||lora_scale||{_loraScale}||lora_scale2||{_loraScale2}"
+            + $"||delta||{_delta}||do_add_noise||{(_doAddNoise ? 1 : 0)}||enable_similar_filter||{(_enableSimilarFilter ? 1 : 0)}"
+            + $"||similar_threshold||{_similarThreshold}||max_skip_frame||{_maxSkipFrame}||guidance_scale||{_guidanceScale}||acceleration||{_acceleration}"
+            + $"||bypass_mode||{(_bypassMode ? "true" : "false")}"
             + $"||prompt||{_defaultPrompt}||neg_prompt||{_defaultNegativePrompt}||run||0|end|";
 
         Debug.Log($"发送命令长度: {loadCmd.Length} 字节");
@@ -307,8 +574,14 @@ public class StreamDiffusionClient : MonoBehaviour
         }
     }
 
-    // 扩展AdvancePipeline方法，支持动态传递强度参数
-    public void AdvancePipeline(Texture2D tex, string prompt, float? strength = null, float? loraScale = null)
+    // 扩展AdvancePipeline方法，支持动态传递强度参数和图像预处理
+    public void AdvancePipeline(
+        Texture2D tex,
+        string prompt,
+        float? strength = null,
+        float? loraScale = null,
+        float? loraScale2 = null
+    )
     {
         try
         {
@@ -323,26 +596,51 @@ public class StreamDiffusionClient : MonoBehaviour
             // 使用传入的参数或默认值
             float currentStrength = strength ?? _strength;
             float currentLoraScale = loraScale ?? _loraScale;
-            
-            Debug.Log($"动态生成: 提示词='{prompt}', 强度={currentStrength}, LoRA强度={currentLoraScale}");
+            float currentLoraScale2 = loraScale2 ?? _loraScale2;
 
-            // 将图像编码为JPEG，降低质量以减少数据大小
-            byte[] imageBytes = ImageConversion.EncodeToJPG(tex, 90); // 90%质量，减少数据量
+            Debug.Log(
+                $"动态生成: 提示词='{prompt}', 强度={currentStrength}, LoRA1强度={currentLoraScale}, LoRA2强度={currentLoraScale2}, 绕过模式={_bypassMode}"
+            );
+            
+            // 记录当前颜色空间
+            bool isLinearSpace = QualitySettings.activeColorSpace == ColorSpace.Linear;
+            Debug.Log($"当前颜色空间: {(isLinearSpace ? "线性" : "Gamma")}");
+            
+            // 记录原始图像的RGB均值
+            Color[] pixels = tex.GetPixels();
+            float avgR = 0, avgG = 0, avgB = 0;
+            foreach (Color p in pixels)
+            {
+                avgR += p.r;
+                avgG += p.g;
+                avgB += p.b;
+            }
+            if (pixels.Length > 0)
+            {
+                avgR /= pixels.Length;
+                avgG /= pixels.Length;
+                avgB /= pixels.Length;
+                Debug.Log($"原始图像平均RGB值: R={avgR:F2}, G={avgG:F2}, B={avgB:F2}");
+            }
+            
+            // 改用PNG格式避免JPEG压缩导致的颜色损失
+            byte[] imageBytes = ImageConversion.EncodeToPNG(tex);
+            
             if (imageBytes == null || imageBytes.Length == 0)
             {
-                Debug.LogError("Failed to encode image to JPEG");
+                Debug.LogError("Failed to encode image to PNG");
                 return;
             }
-
+            
             // 使用Base64编码处理图像数据，避免二进制数据中的特殊字符干扰协议解析
             string base64Image = System.Convert.ToBase64String(imageBytes);
             Debug.Log(
-                $"Encoded image size: {imageBytes.Length} bytes, Base64 length: {base64Image.Length}"
+                $"使用PNG编码，大小: {imageBytes.Length} 字节, Base64长度: {base64Image.Length}"
             );
 
-            // 构建命令，使用Base64编码的图像数据，添加强度参数
+            // 添加颜色空间信息到命令中
             string command =
-                $"|start|command||advance||prompt||{prompt}||strength||{currentStrength}||lora_scale||{currentLoraScale}||image_base64||{base64Image}||run||0|end|";
+                $"|start|command||advance||prompt||{prompt}||strength||{currentStrength}||lora_scale||{currentLoraScale}||lora_scale2||{currentLoraScale2}||is_linear_space||{isLinearSpace.ToString().ToLower()}||bypass_mode||{_bypassMode.ToString().ToLower()}||image_base64||{base64Image}||run||0|end|";
 
             // 分块发送大数据
             byte[] commandBytes = Encoding.UTF8.GetBytes(command);
@@ -602,5 +900,36 @@ public class StreamDiffusionClient : MonoBehaviour
             _clientThread.Interrupt();
         if (_client != null)
             _client.Close();
+    }
+
+    // 添加InputImage方法
+    public void InputImage(byte[] imageBytes, int width, int height)
+    {
+        if (!isRunning() || imageBytes == null || imageBytes.Length != width * height * 3)
+        {
+            Debug.LogError($"InputImage失败: 服务未运行或图像数据无效");
+            return;
+        }
+
+        try
+        {
+            // 创建Texture2D并设置像素数据
+            Texture2D tex = new Texture2D(width, height, TextureFormat.RGB24, false);
+            tex.LoadRawTextureData(imageBytes);
+            tex.Apply();
+            
+            // 使用默认参数调用AdvancePipeline
+            AdvancePipeline(
+                tex, 
+                _defaultPrompt
+            );
+            
+            // 清理临时纹理
+            Destroy(tex);
+        }
+        catch (System.Exception e)
+        {
+            Debug.LogError($"InputImage处理错误: {e.Message}");
+        }
     }
 }
