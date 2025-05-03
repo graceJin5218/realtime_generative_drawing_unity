@@ -19,13 +19,13 @@ using UnityEngine;
 public class StreamDiffusionClient : MonoBehaviour
 {
     [Tooltip("基础模型路径，相对于StreamingAssets/models目录")]
-    public string _baseModelPath = "Model/revAnimatedLCMfp16.safetensors";
+    public string _baseModelPath = "kohaku-v2.1";
 
     [Tooltip("VAE模型路径，相对于StreamingAssets/models目录")]
-    public string _tinyVaeModelPath = "VAE";
+    public string _tinyVaeModelPath = "taesd";
 
     [Tooltip("第一个LoRA模型路径，相对于StreamingAssets/models目录")]
-    public string _loraModelPath = "";
+    public string _loraModelPath = "lcm-lora-sdv1-5";
 
     [Tooltip("第二个LoRA模型路径，相对于StreamingAssets/models目录")]
     public string _loraModelPath2 = "";
@@ -118,8 +118,7 @@ public class StreamDiffusionClient : MonoBehaviour
     private string _serverIP = "127.0.0.1";
     private int _serverPort = 9999;
     private int _pipelineLoaded = 0;
-    private bool _isRunning = false,
-        _isAdvancing = false;
+    private bool _isRunning = false, _isAdvancing = false;
     private bool _restartRequested = false; // 标记是否请求重启服务
 
     // 添加Socket配置参数
@@ -272,20 +271,18 @@ public class StreamDiffusionClient : MonoBehaviour
             if (validEnd)
             {
                 Debug.Log($"接收到完整图像数据，大小: {_advancedData.Length} 字节");
-                
                 if (_resultTexture == null)
                 {
-                    _resultTexture = new Texture2D(2, 2, TextureFormat.RGBA32, false, QualitySettings.activeColorSpace == ColorSpace.Linear);
-                    Debug.Log($"创建新的结果纹理，颜色空间：{QualitySettings.activeColorSpace}");
+                    _resultTexture = new Texture2D(2, 2, TextureFormat.RGBA32, false,
+                                                   QualitySettings.activeColorSpace == ColorSpace.Linear);
+                    //Debug.Log($"创建新的结果纹理，颜色空间：{QualitySettings.activeColorSpace}");
                     if (_resultMaterial != null)
                     {
                         _resultMaterial.mainTexture = _resultTexture;
                         Debug.Log("将新纹理分配给材质");
                     }
                     else
-                    {
                         Debug.LogError("结果材质为空，无法分配纹理");
-                    }
                 }
 
                 try
@@ -293,9 +290,7 @@ public class StreamDiffusionClient : MonoBehaviour
                     // 记录图像数据的前20个字节，用于调试
                     string dataPrefix = "";
                     for (int i = 0; i < System.Math.Min(20, _advancedData.Length); i++)
-                    {
-                        dataPrefix += _advancedData[i].ToString("X2") + " ";
-                    }
+                        { dataPrefix += _advancedData[i].ToString("X2") + " "; }
                     Debug.Log($"图像数据前缀: {dataPrefix}");
                     
                     // 验证图像格式
@@ -307,8 +302,7 @@ public class StreamDiffusionClient : MonoBehaviour
                         _advancedData[0] == 0xFF && _advancedData[1] == 0xD8 && 
                         _advancedData[2] == 0xFF);
                     
-                    Debug.Log($"图像格式: {(isPng ? "PNG" : (isJpeg ? "JPEG" : "未知"))}");
-                    
+                    //Debug.Log($"图像格式: {(isPng ? "PNG" : (isJpeg ? "JPEG" : "未知"))}");
                     bool success = _resultTexture.LoadImage(_advancedData, !isPng); // 如果不是PNG，保留透明度
                     Debug.Log($"加载图像{(success ? "成功" : "失败")}，宽度={_resultTexture.width}, 高度={_resultTexture.height}");
                     
@@ -333,8 +327,7 @@ public class StreamDiffusionClient : MonoBehaviour
                             avgG /= pixels.Length;
                             avgB /= pixels.Length;
                             avgA /= pixels.Length;
-                            
-                            Debug.Log($"收到图像平均RGB值: R={avgR:F3}, G={avgG:F3}, B={avgB:F3}, A={avgA:F3}");
+                            //Debug.Log($"收到图像平均RGB值: R={avgR:F3}, G={avgG:F3}, B={avgB:F3}, A={avgA:F3}");
                             
                             // 检查是否是全黑图像
                             if (avgR < 0.01f && avgG < 0.01f && avgB < 0.01f)
@@ -342,9 +335,9 @@ public class StreamDiffusionClient : MonoBehaviour
                                 Debug.LogWarning("检测到全黑图像！创建测试色彩图案");
                                 
                                 // 创建一个测试图案替换黑色图像
-                                _resultTexture = new Texture2D(512, 512, TextureFormat.RGBA32, false, QualitySettings.activeColorSpace == ColorSpace.Linear);
+                                _resultTexture = new Texture2D(512, 512, TextureFormat.RGBA32, false,
+                                                               QualitySettings.activeColorSpace == ColorSpace.Linear);
                                 Color[] testPixels = new Color[512 * 512];
-                                
                                 for (int y = 0; y < 512; y++)
                                 {
                                     for (int x = 0; x < 512; x++)
@@ -357,38 +350,30 @@ public class StreamDiffusionClient : MonoBehaviour
                                             testPixels[y * 512 + x] = new Color(0, 0, 1, 1); // 蓝色区域
                                     }
                                 }
-                                
                                 _resultTexture.SetPixels(testPixels);
                                 _resultTexture.Apply();
                                 
                                 if (_resultMaterial != null)
-                                {
                                     _resultMaterial.mainTexture = _resultTexture;
-                                }
                             }
                         }
                         else
-                        {
                             Debug.LogError("纹理像素数组为空");
-                        }
                     }
                     else
                     {
                         Debug.LogError("图像加载到纹理失败");
-                        
+                        _resultTexture = new Texture2D(512, 512, TextureFormat.RGBA32, false,
+                                                       QualitySettings.activeColorSpace == ColorSpace.Linear);
+
                         // 创建一个应急图像
-                        _resultTexture = new Texture2D(512, 512, TextureFormat.RGBA32, false, QualitySettings.activeColorSpace == ColorSpace.Linear);
                         Color[] testPixels = new Color[512 * 512];
                         for (int i = 0; i < testPixels.Length; i++)
-                        {
                             testPixels[i] = new Color(1, 1, 0, 1); // 黄色
-                        }
                         _resultTexture.SetPixels(testPixels);
                         _resultTexture.Apply();
                         if (_resultMaterial != null)
-                        {
                             _resultMaterial.mainTexture = _resultTexture;
-                        }
                     }
                 }
                 catch (System.Exception e)
@@ -409,9 +394,6 @@ public class StreamDiffusionClient : MonoBehaviour
         }
     }
 
-    /// <summary>
-    /// 图像预处理，调整输入图像的亮度、对比度和饱和度
-    /// </summary>
     public byte[] PreprocessImage(byte[] imageBytes, int width, int height)
     {
         if (imageBytes == null || imageBytes.Length == 0)
@@ -431,8 +413,7 @@ public class StreamDiffusionClient : MonoBehaviour
                     imageBytes[byteIndex],
                     imageBytes[byteIndex + 1],
                     imageBytes[byteIndex + 2],
-                    255
-                );
+                    255);
             }
         }
         
@@ -443,8 +424,7 @@ public class StreamDiffusionClient : MonoBehaviour
             Color linearColor = new Color(
                 pixels[i].r / 255f,
                 pixels[i].g / 255f,
-                pixels[i].b / 255f
-            );
+                pixels[i].b / 255f);
             
             // 亮度调整
             linearColor *= _brightness;
@@ -476,8 +456,7 @@ public class StreamDiffusionClient : MonoBehaviour
                 (byte)(linearColor.r * 255),
                 (byte)(linearColor.g * 255),
                 (byte)(linearColor.b * 255),
-                255
-            );
+                255);
         }
         
         // 转回字节数组
@@ -489,7 +468,6 @@ public class StreamDiffusionClient : MonoBehaviour
             result[byteIndex + 1] = pixels[i].g;
             result[byteIndex + 2] = pixels[i].b;
         }
-        
         return result;
     }
 
@@ -505,8 +483,7 @@ public class StreamDiffusionClient : MonoBehaviour
             : GetFullModelPath(_loraModelPath);
         
         string fullLoraPath2 = string.IsNullOrEmpty(_loraModelPath2)
-            ? ""
-            : GetFullModelPath(_loraModelPath2);
+            ? "" : GetFullModelPath(_loraModelPath2);
 
         Debug.Log(
             $"Sending paths to Python server: Base={fullBaseModelPath}, VAE={fullVaePath}, LoRA1={fullLoraPath}, LoRA2={fullLoraPath2}"
@@ -523,7 +500,6 @@ public class StreamDiffusionClient : MonoBehaviour
     {
         int vae = (_useTinyVae ? 1 : 0),
             lora = (_useLcmLora ? 1 : 0);
-
         Debug.Log(
             $"准备发送参数到Python: 宽度={_width}, 高度={_height}, 种子={_seed}, 强度={_strength}, LoRA1强度={_loraScale}, LoRA2强度={_loraScale2}"
         );
@@ -546,7 +522,7 @@ public class StreamDiffusionClient : MonoBehaviour
             + $"||bypass_mode||{(_bypassMode ? "true" : "false")}"
             + $"||prompt||{_defaultPrompt}||neg_prompt||{_defaultNegativePrompt}||run||0|end|";
 
-        Debug.Log($"发送命令长度: {loadCmd.Length} 字节");
+        //Debug.Log($"发送命令长度: {loadCmd.Length} 字节");
         _pipelineLoaded = -1; // pending
         SendCommandToPython(loadCmd);
     }
@@ -561,12 +537,10 @@ public class StreamDiffusionClient : MonoBehaviour
                 // 使用UTF-8编码，确保特殊字符和中文能正确传输
                 byte[] messageBytes = Encoding.UTF8.GetBytes(command);
                 _stream.Write(messageBytes, 0, messageBytes.Length);
-                Debug.Log($"Command sent, length: {messageBytes.Length} bytes");
+                //Debug.Log($"Command sent, length: {messageBytes.Length} bytes");
             }
             else
-            {
                 Debug.LogError("Cannot send command - stream is null or not writable");
-            }
         }
         catch (System.Exception e)
         {

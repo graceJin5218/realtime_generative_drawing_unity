@@ -850,17 +850,31 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 1af1aa07155394d4d92696c423d4fa02, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  _baseModelPath: ./models/kohaku-v2.1
-  _tinyVaeModelPath: ./models/taesd
-  _loraModelPath: ./models/lcm-lora-sdv1-5
-  _acceleration: tensorrt
+  _baseModelPath: kohaku-v2.1
+  _tinyVaeModelPath: taesd
+  _loraModelPath: lcm-lora-sdv1-5
+  _loraModelPath2: 
+  _acceleration: cuda
   _width: 512
   _height: 512
   _seed: 34
   _useTinyVae: 1
-  _useLcmLora: 0
+  _useLcmLora: 1
+  _loraScale: 0.85
+  _loraScale2: 0.5
+  _brightness: 1
+  _contrast: 1
+  _saturation: 1
   _showPythonConsole: 0
-  _defaultPrompt: 1 girl
+  _strength: 1
+  _delta: 0.8
+  _doAddNoise: 1
+  _enableSimilarFilter: 1
+  _similarThreshold: 0.6
+  _maxSkipFrame: 10
+  _guidanceScale: 1
+  _bypassMode: 0
+  _defaultPrompt: 1 painting of 1 cat, masterpiece
   _defaultNegativePrompt: low quality, bad quality, blurry, low resolution
   _resultMaterial: {fileID: 2100000, guid: 943e6c2cac3a6e64dbdb2dad70dbb0d6, type: 2}
 --- !u!4 &1191806948
@@ -894,6 +908,10 @@ MonoBehaviour:
   _inputMaterial: {fileID: 2100000, guid: 4267dda822cb2f644b8f22000204f564, type: 2}
   _startButton: {fileID: 381118695}
   _promptInput: {fileID: 1493324038}
+  _continuousGeneration: 0
+  _generationInterval: 0.5
+  _bypassMode: 0
+  _bypassModeToggle: {fileID: 0}
 --- !u!1 &1215471198
 GameObject:
   m_ObjectHideFlags: 0

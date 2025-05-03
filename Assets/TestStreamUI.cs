@@ -1,8 +1,9 @@
+//#define PAINT_IN_2D
+
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
-using PaintIn2D;  // 引入PaintIn2D命名空间
 
 public class TestStreamUI : MonoBehaviour
 {
@@ -10,13 +11,17 @@ public class TestStreamUI : MonoBehaviour
     public Material _inputMaterial;
     public Button _startButton;
     public InputField _promptInput;
-    
+
+#if PAINT_IN_2D
     // 添加绘画相关组件引用
     [Header("绘画设置")]
-    public CwPaintableSprite _paintableSprite; // 可绘制的Sprite组件
-    public CwPaintableSpriteTexture _paintableTexture; // 可绘制的纹理组件
+    public PaintIn2D.CwPaintableSprite _paintableSprite; // 可绘制的Sprite组件
+    public PaintIn2D.CwPaintableSpriteTexture _paintableTexture; // 可绘制的纹理组件
     public bool _usePaintTexture = true; // 是否使用绘制的纹理作为输入
-    
+#else
+    bool _usePaintTexture = false;
+#endif
+
     [Header("连续生成设置")]
     [Tooltip("启用后会自动按照指定间隔持续推送数据到StreamDiffusion")]
     public bool _continuousGeneration = false; // 是否连续推送数据到StreamDiffusion
@@ -55,11 +60,7 @@ public class TestStreamUI : MonoBehaviour
         _startButton.interactable = false;
         
         // 将绕过模式设置传递给StreamDiffusionClient
-        if (_stream != null)
-        {
-            _stream._bypassMode = _bypassMode;
-        }
-        
+        if (_stream != null) _stream._bypassMode = _bypassMode;
         if (_stream.isValid() && !_stream.isRunning()) _stream.LoadPipeline();
     }
 
@@ -67,13 +68,11 @@ public class TestStreamUI : MonoBehaviour
     {
         if (_stream.isRunning() && !_stream.isGenerating())
         {
+#if PAINT_IN_2D
             // 如果使用绘制的纹理，则获取当前绘制的纹理
             if (_usePaintTexture && _paintableTexture != null)
-            {
-                // 获取当前绘制的纹理
                 UpdatePaintTexture();
-            }
-            
+#endif
             _stream.AdvancePipeline(_inputTexture, _promptInput.text);
         }
     }
@@ -86,12 +85,11 @@ public class TestStreamUI : MonoBehaviour
         {
             if (_stream.isRunning() && !_stream.isGenerating())
             {
+#if PAINT_IN_2D
                 // 如果使用绘制的纹理，则获取当前绘制的纹理
                 if (_usePaintTexture && _paintableTexture != null)
-                {
-                    // 获取当前绘制的纹理
                     UpdatePaintTexture();
-                }
+#endif
                 
                 // 推送当前数据
                 _stream.AdvancePipeline(_inputTexture, _promptInput.text);
@@ -107,9 +105,9 @@ public class TestStreamUI : MonoBehaviour
     // 新增方法：更新绘制的纹理
     private void UpdatePaintTexture()
     {
-        if (_paintableTexture == null || _paintableTexture.Current == null) return;
-        
+#if PAINT_IN_2D
         // 获取当前绘制的纹理（RenderTexture类型）
+        if (_paintableTexture == null || _paintableTexture.Current == null) return;
         RenderTexture sourceTexture = _paintableTexture.Current as RenderTexture;
         if (sourceTexture == null) return;
         
@@ -118,15 +116,14 @@ public class TestStreamUI : MonoBehaviour
             _paintTexture.width != sourceTexture.width || 
             _paintTexture.height != sourceTexture.height)
         {
-            if (_paintTexture != null) Destroy(_paintTexture);
             // 确保创建的纹理格式与颜色空间匹配
             bool linearColorSpace = QualitySettings.activeColorSpace == ColorSpace.Linear;
+            if (_paintTexture != null) Destroy(_paintTexture);
             _paintTexture = new Texture2D(sourceTexture.width, sourceTexture.height, TextureFormat.RGBA32, false, linearColorSpace);
         }
         
         // 保存当前的RenderTexture
         RenderTexture prevRT = RenderTexture.active;
-        
         try
         {
             // 设置当前RenderTexture为源纹理
@@ -150,13 +147,8 @@ public class TestStreamUI : MonoBehaviour
             
             // 更新输入纹理
             _inputTexture = _paintTexture;
-            
-            // 更新输入材质的纹理
             if (_inputMaterial != null)
-            {
                 _inputMaterial.mainTexture = _inputTexture;
-            }
-            
             Debug.Log($"已更新绘制纹理: {_inputTexture.width}x{_inputTexture.height}, 颜色空间: {QualitySettings.activeColorSpace}");
         }
         finally
@@ -164,12 +156,12 @@ public class TestStreamUI : MonoBehaviour
             // 恢复之前的RenderTexture
             RenderTexture.active = prevRT;
         }
+#endif
     }
 
     private IEnumerator UpdateWebcamData()
     {
         if (_usePaintTexture) yield break; // 如果使用绘制模式，不更新网络摄像头
-        
         _inputTexture = new Texture2D(
             _webcamTexture.width, _webcamTexture.height, TextureFormat.RGBA32, false);
         _inputMaterial.mainTexture = _inputTexture;
@@ -196,10 +188,11 @@ public class TestStreamUI : MonoBehaviour
         
         if (_usePaintTexture)
         {
+#if PAINT_IN_2D
             // 如果使用绘制的纹理，确保组件存在
             if (_paintableSprite == null)
             {
-                _paintableSprite = GetComponentInChildren<CwPaintableSprite>();
+                _paintableSprite = GetComponentInChildren<PaintIn2D.CwPaintableSprite>();
                 if (_paintableSprite == null)
                 {
                     Debug.LogError("未找到CwPaintableSprite组件，请手动设置！");
@@ -209,7 +202,7 @@ public class TestStreamUI : MonoBehaviour
             
             if (_paintableTexture == null && _paintableSprite != null)
             {
-                _paintableTexture = _paintableSprite.GetComponentInChildren<CwPaintableSpriteTexture>();
+                _paintableTexture = _paintableSprite.GetComponentInChildren<PaintIn2D.CwPaintableSpriteTexture>();
                 if (_paintableTexture == null)
                 {
                     Debug.LogError("未找到CwPaintableSpriteTexture组件，请手动设置！");
@@ -219,34 +212,22 @@ public class TestStreamUI : MonoBehaviour
             
             // 如果找到了可绘制组件，设置初始纹理
             if (_usePaintTexture && _paintableTexture != null && _paintableTexture.Current != null)
-            {
                 UpdatePaintTexture();
-            }
-            else
-            {
-                // 如果无法使用绘制的纹理，回退到普通模式
+            else   // 如果无法使用绘制的纹理，回退到普通模式
                 _inputTexture = _originalInputTexture as Texture2D;
-            }
             
             // 用于定期更新绘制的纹理
             if (_usePaintTexture)
-            {
                 StartCoroutine(UpdatePaintTextureRoutine());
-            }
+#endif
         }
         else
-        {
             _inputTexture = _originalInputTexture as Texture2D;
-        }
-        
-        // 记录初始连续生成状态
-        _previousContinuousGeneration = _continuousGeneration;
-        
+
         // 如果一开始就启用了连续生成，立即启动协程
+        _previousContinuousGeneration = _continuousGeneration;
         if (_continuousGeneration)
-        {
             _continuousGenerationCoroutine = StartCoroutine(ContinuousGenerationRoutine());
-        }
     }
     
     // 定期更新绘制的纹理
@@ -254,10 +235,10 @@ public class TestStreamUI : MonoBehaviour
     {
         while (true)
         {
+#if PAINT_IN_2D
             if (_paintableTexture != null && _paintableTexture.Current != null)
-            {
                 UpdatePaintTexture();
-            }
+#endif
             yield return new WaitForSeconds(0.1f); // 每0.1秒更新一次
         }
     }
@@ -271,9 +252,7 @@ public class TestStreamUI : MonoBehaviour
             {
                 // 开始连续生成
                 if (_continuousGenerationCoroutine == null)
-                {
                     _continuousGenerationCoroutine = StartCoroutine(ContinuousGenerationRoutine());
-                }
             }
             else
             {
@@ -331,15 +310,13 @@ public class TestStreamUI : MonoBehaviour
         int width = sourceTexture.width;
         int height = sourceTexture.height;
         int dataLength = width * height * 3; // RGB格式
-
         if (_imageBytes == null || _imageBytes.Length != dataLength)
-        {
             _imageBytes = new byte[dataLength];
-        }
 
         // 创建临时纹理并复制源纹理内容
         RenderTexture.active = sourceTexture;
-        Texture2D tempTexture = new Texture2D(width, height, TextureFormat.RGB24, false, QualitySettings.activeColorSpace == ColorSpace.Linear);
+        Texture2D tempTexture = new Texture2D(width, height, TextureFormat.RGB24, false,
+                                              QualitySettings.activeColorSpace == ColorSpace.Linear);
         tempTexture.ReadPixels(new Rect(0, 0, width, height), 0, 0);
         tempTexture.Apply();
 
@@ -354,13 +331,10 @@ public class TestStreamUI : MonoBehaviour
             {
                 int pixelIndex = y * width + x;
                 Color color = pixels[pixelIndex];
-                
-                // 颜色空间处理
+
+                // 确保颜色从线性空间正确转换到sRGB
                 if (QualitySettings.activeColorSpace == ColorSpace.Linear)
-                {
-                    // 确保颜色从线性空间正确转换到sRGB
                     color = color.linear;
-                }
 
                 // 转换为RGB字节
                 _imageBytes[byteIndex++] = (byte)Mathf.Clamp(color.r * 255, 0, 255);
@@ -380,7 +354,6 @@ public class TestStreamUI : MonoBehaviour
     public void ToggleBypassMode(bool isOn)
     {
         _bypassMode = isOn;
-        
         if (_stream != null)
         {
             _stream._bypassMode = _bypassMode;
