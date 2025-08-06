@@ -6,110 +6,113 @@ using System.Threading;
 using PimDeWitte.UnityMainThreadDispatcher;
 using UnityEngine;
 
+
 /// <summary>
-/// StreamDiffusion客户端，用于与Python服务端通信并控制图像生成
-/// 所有参数都可在Unity Inspector中配置：
-/// - 模型路径：相对于StreamingAssets/models目录的路径
-/// - 图像尺寸：生成图像的宽高
-/// - 种子：随机种子，影响生成效果
-/// - 加速模式：使用的加速技术，如tensorrt, cuda等
-/// - 提示词：控制图像生成内容的文本描述
-/// - 强度参数：控制生成过程的各种强度系数
+/// StreamDiffusion 클라이언트, Python 서버와 통신하여 이미지 생성을 제어합니다.
+/// 모든 매개변수는 Unity Inspector에서 설정할 수 있습니다:
+/// - 모델 경로: StreamingAssets/models 폴더를 기준으로 한 상대 경로
+/// - 이미지 크기: 생성할 이미지의 너비와 높이
+/// - 시드: 랜덤 시드, 생성 결과에 영향
+/// - 가속 모드: tensorrt, cuda 등 사용 가속 기술
+/// - 프롬프트: 이미지 생성 내용을 제어하는 텍스트 설명
+/// - 강도 매개변수: 생성 과정의 다양한 강도 계수
 /// </summary>
+/// 
 public class StreamDiffusionClient : MonoBehaviour
 {
-    [Tooltip("基础模型路径，相对于StreamingAssets/models目录")]
+    [Tooltip("기본 모델 경로 (StreamingAssets/models 기준)")]
     public string _baseModelPath = "kohaku-v2.1";
 
-    [Tooltip("VAE模型路径，相对于StreamingAssets/models目录")]
+    [Tooltip("VAE 모델 경로 (StreamingAssets/models 기준)")]
     public string _tinyVaeModelPath = "taesd";
 
-    [Tooltip("第一个LoRA模型路径，相对于StreamingAssets/models目录")]
+    [Tooltip("첫 번째 LoRA 모델 경로 (StreamingAssets/models 기준)")]
     public string _loraModelPath = "lcm-lora-sdv1-5";
 
-    [Tooltip("第二个LoRA模型路径，相对于StreamingAssets/models目录")]
+    [Tooltip("두 번째 LoRA 모델 경로 (StreamingAssets/models 기준)")]
     public string _loraModelPath2 = "";
 
-    [Tooltip("加速模式：tensorrt, cuda等")]
+    [Tooltip("가속 모드: tensorrt, cuda 등")]
     public string _acceleration = "tensorrt";
 
-    [Tooltip("图像宽度")]
+    [Tooltip("이미지 너비")]
     public int _width = 512;
 
-    [Tooltip("图像高度")]
+    [Tooltip("이미지 높이")]
     public int _height = 512;
 
-    [Tooltip("随机种子")]
+    [Tooltip("랜덤 시드")]
     public int _seed = 603665;
 
-    [Tooltip("是否使用TinyVAE")]
+    [Tooltip("TinyVAE 사용 여부")]
     public bool _useTinyVae = true;
 
-    [Tooltip("是否使用LCM LoRA")]
+    [Tooltip("LCM LoRA 사용 여부")]
     public bool _useLcmLora = true;
 
-    [Tooltip("第一个LoRA强度")]
+    [Tooltip("첫 번째 LoRA 강도")]
     [Range(0.1f, 1.0f)]
     public float _loraScale = 0.85f;
 
-    [Tooltip("第二个LoRA强度")]
+    [Tooltip("두 번째 LoRA 강도")]
     [Range(0.1f, 1.0f)]
     public float _loraScale2 = 0.5f;
 
-    [Header("图像预处理参数")]
-    [Tooltip("亮度调整")]
+    [Header("이미지 전처리 매개변수")]
+    [Tooltip("명도 조정")]
     [Range(0.5f, 3f)]
     public float _brightness = 1.0f;
 
-    [Tooltip("对比度调整")]
+    [Tooltip("대비 조정")]
     [Range(0.5f, 1.5f)]
     public float _contrast = 1.0f;
 
-    [Tooltip("饱和度调整")]
+    [Tooltip("채도 조정")]
     [Range(0.0f, 2.0f)]
     public float _saturation = 1.0f;
 
     [Space]
-    [Tooltip("是否显示Python控制台")]
+    [Tooltip("Python 콘솔 표시 여부")]
     public bool _showPythonConsole = false;
 
-    [Tooltip("图像生成强度")]
+    [Tooltip("이미지 생성 강도")]
     [Range(1f, 3.0f)]
     public float _strength = 1.0f;
 
-    [Header("高级参数")]
-    [Tooltip("Delta参数，控制噪声添加量")]
+    [Header("고급 매개변수")]
+    [Tooltip("Delta 매개변수, 노이즈 추가량 제어")]
     [Range(0.1f, 1.0f)]
     public float _delta = 0.8f;
 
-    [Tooltip("是否在每步添加噪声")]
+    [Tooltip("매 스텝마다 노이즈 추가 여부")]
     public bool _doAddNoise = true;
 
-    [Tooltip("是否启用相似图像过滤")]
+    [Tooltip("유사 이미지 필터 사용 여부")]
     public bool _enableSimilarFilter = true;
 
-    [Tooltip("相似图像过滤阈值")]
+    [Tooltip("유사 이미지 필터 임계값")]
     [Range(0.1f, 0.99f)]
     public float _similarThreshold = 0.6f;
 
-    [Tooltip("最大跳过帧数")]
+    [Tooltip("최대 스킵 프레임 수")]
     [Range(1, 30)]
     public int _maxSkipFrame = 10;
 
-    [Tooltip("引导尺度")]
+    [Tooltip("Guidance 스케일")]
     [Range(0.1f, 10.0f)]
     public float _guidanceScale = 1.0f;
 
     [Space]
-    [Tooltip("绕过模式，直接返回输入图像而不经过AI处理")]
+    [Tooltip("바이패스 모드: AI 처리 없이 원본 이미지 반환 여부")]
     public bool _bypassMode = false;
 
     [Space]
-    [Tooltip("提示词")]
+    [Tooltip("기본 프롬프트")]
     public string _defaultPrompt = "";
 
-    [Tooltip("负面提示词")]
+    [Tooltip("기본 네거티브 프롬프트")]
     public string _defaultNegativePrompt = "";
+
 
     public Material _resultMaterial;
     private Texture2D _resultTexture;
@@ -152,7 +155,7 @@ public class StreamDiffusionClient : MonoBehaviour
         return _isRunning && _pipelineLoaded > 0;
     }
 
-    // 辅助方法：构建完整的模型路径
+    // 전체 모델 경로 생성 헬퍼
     private string GetFullModelPath(string relativePath)
     {
         return System

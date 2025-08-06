@@ -4,14 +4,15 @@ from PIL import Image
 from typing import Literal, Optional
 import numpy as np
 import random
+import torchvision.transforms as T
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "streamdiffusion"))
 from utils.wrapper import StreamDiffusionWrapper
 
-# 获取当前脚本所在目录的绝对路径
+# 현재 스크립트가 위치한 디렉토리의 절대 경로를 가져옴
 base_dir = os.path.dirname(os.path.abspath(__file__))
 
-# 尝试在多个位置查找模型文件
+# 여러 위치에서 모델 파일을 찾도록 시도
 model_filename = ""  # 移除硬编码的默认模型名称
 possible_paths = [
     os.path.join(base_dir, "models", "Model", model_filename),  # 标准路径
@@ -141,7 +142,7 @@ class Pipeline:
                 use_denoising_batch=True,
                 device=device,
                 dtype=torch_dtype,
-                output_type="tensor"  # 修改为tensor类型输出
+                output_type="pil"  # 修改为tensor类型输出
             )
         else:
             # 使用预加载的pipeline
@@ -165,7 +166,7 @@ class Pipeline:
                 use_denoising_batch=True,
                 device=device,
                 dtype=torch_dtype,
-                output_type="tensor"  # 修改为tensor类型输出
+                output_type="pil"  # 修改为tensor类型输出
             )
         # 初始化阶段不调用prepare，将在loadPipeline函数中调用
 
@@ -222,166 +223,186 @@ class Pipeline:
             import traceback
             traceback.print_exc()
 
-    def predict(self, input: Image.Image, new_prompt: Optional[str] = None) -> torch.Tensor:
+    def predict(self, input_image: Image.Image, new_prompt: Optional[str] = None) -> Image.Image:
         try:
-            # 预处理输入图像为张量
-            print(f"Input image size: {input.size}")
+            print(f"Input image size: {input_image.size}, mode: {input_image.mode}")
             
-            # 保存输入图像副本以便进行调试
+            # RGBA나 다른 모드를 RGB로 변환
+            if input_image.mode != "RGB":
+                print(f"Converting image from {input_image.mode} to RGB")
+                if input_image.mode == "RGBA":
+                    # RGBA의 경우 흰색 배경으로 합성
+                    background = Image.new("RGB", input_image.size, (255, 255, 255))
+                    background.paste(input_image, mask=input_image.split()[3] if len(input_image.split()) > 3 else None)
+                    input_image = background
+                else:
+                    # 다른 모드는 직접 변환
+                    input_image = input_image.convert("RGB")
+                print(f"Converted to RGB mode")
+
+            transform = T.Compose([
+                T.ToTensor(),
+                T.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5])
+            ])
+
+            # 디버깅 및 전처리 코드
             try:
-                input_copy = input.copy()
+                input_copy = input_image.copy()
                 input_debug_path = "debug_input.png"
                 input_copy.save(input_debug_path)
-                print(f"保存输入图像到: {input_debug_path}")
+                print(f"보존 입력 이미지 대상: {input_debug_path}")
             except Exception as e:
-                print(f"保存调试图像失败: {e}")
-            
-            # 分析原始输入图像的RGB值
-            arr_input = np.array(input)
-            print(f"输入图像平均RGB值: R={arr_input[:,:,0].mean():.2f}, G={arr_input[:,:,1].mean():.2f}, B={arr_input[:,:,2].mean():.2f}")
-            
-            # 确保bypass_mode为False时正确处理
+                print(f"저장 디버그 이미지 실패: {e}")
+
+            arr_input = np.array(input_image)
+            print(f"입력 이미지 평균 RGB 값: R={arr_input[:,:,0].mean():.2f}, G={arr_input[:,:,1].mean():.2f}, B={arr_input[:,:,2].mean():.2f}")
+
             global bypass_mode, is_linear_space
-            
-            # 如果图像明显是空白的(所有像素接近黑色)，使用测试图像代替
-            is_blank = arr_input.mean() < 10  # 平均像素值小于10/255
+
+            # 공백 이미지 처리
+            is_blank = arr_input.mean() < 10
             if is_blank:
-                print("检测到空白输入图像，创建测试图像代替")
-                # 创建彩色测试图像
+                print("검색된 공백 입력 이미지, 테스트 이미지 생성 대체")
                 test_array = np.zeros((512, 512, 3), dtype=np.uint8)
                 for y in range(512):
                     for x in range(512):
                         if x < 170:
-                            test_array[y, x] = [200, 100, 50]  # 橙棕色
+                            test_array[y, x] = [200, 100, 50]
                         elif x < 340:
-                            test_array[y, x] = [50, 200, 100]  # 绿色
+                            test_array[y, x] = [50, 200, 100]
                         else:
-                            test_array[y, x] = [100, 50, 200]  # 紫色
-                input = Image.fromarray(test_array)
+                            test_array[y, x] = [100, 50, 200]
+                input_image = Image.fromarray(test_array)
                 arr_input = test_array
-            
-            # 检查是否需要从线性空间转换为Gamma空间
+
+            # 색공간 처리
             if is_linear_space:
-                print("检测到线性颜色空间输入，转换为Gamma空间")
-                # 从线性空间转换到Gamma空间
+                print("검색된 선형 색공간 입력, Gamma 공간으로 변환")
                 arr_float = arr_input.astype(np.float32) / 255.0
                 arr_gamma = np.power(arr_float, 1/2.2) * 255.0
                 arr_gamma = np.clip(arr_gamma, 0, 255).astype(np.uint8)
-                
-                # 分析转换后的RGB值
-                print(f"转换后平均RGB值: R={arr_gamma[:,:,0].mean():.2f}, G={arr_gamma[:,:,1].mean():.2f}, B={arr_gamma[:,:,2].mean():.2f}")
-                
-                # 创建Gamma空间图像并保存用于调试
+                print(f"변환 후 평균 RGB 값: R={arr_gamma[:,:,0].mean():.2f}, G={arr_gamma[:,:,1].mean():.2f}, B={arr_gamma[:,:,2].mean():.2f}")
                 gamma_image = Image.fromarray(arr_gamma)
+                
+                # gamma_image도 RGB 모드 확인
+                if gamma_image.mode != "RGB":
+                    gamma_image = gamma_image.convert("RGB")
+                    
                 try:
                     gamma_image.save("debug_gamma_converted.png")
-                    print("保存Gamma转换图像到debug_gamma_converted.png")
+                    print("Gamma 변환 이미지를 debug_gamma_converted.png에 저장")
                 except Exception as e:
-                    print(f"保存Gamma图像失败: {e}")
-                
-                # 使用处理后的图像进行预处理
-                image_tensor = self.stream.preprocess_image(gamma_image)
+                    print(f"Gamma 이미지 저장 실패: {e}")
+                image_tensor = transform(gamma_image).unsqueeze(0)
             else:
-                # 如果不是线性空间，直接预处理
-                print("非线性空间，直接处理输入图像")
-                image_tensor = self.stream.preprocess_image(input)
-            
-            # 使用新提示词（如果有）
+                print("비선형 공간, 입력 이미지 직접 처리")
+                image_tensor = transform(input_image).unsqueeze(0)
+
+            # 나머지 코드는 그대로...
+            # 장치 및 dtype 일관되게 적용
+            if torch.cuda.is_available():
+                image_tensor = image_tensor.to(device="cuda", dtype=torch.float16)
+            else:
+                image_tensor = image_tensor.to(self.stream.device if hasattr(self, 'stream') else "cpu")
+
+            # 프롬프트 업데이트
             if new_prompt:
-                print(f"Using prompt: {new_prompt}")
-                
-            # 强制让模型重设prompt
+                print(f"프롬프트 사용: {new_prompt}")
             try:
                 self.stream.stream.update_prompt(new_prompt if new_prompt else "")
-                print("成功更新提示词")
+                print("프롬프트 업데이트 성공")
             except Exception as e:
-                print(f"更新提示词失败: {e}")
-            
+                print(f"프롬프트 업데이트 실패: {e}")
+
+            # 예열 및 추론
             try:
-                # 如果批处理大小大于1，先运行几次
-                for _ in range(self.stream.batch_size - 1):
-                    print(f"执行预热步骤 {_+1}/{self.stream.batch_size-1}")
+                # 예열 단계
+                for _ in range(getattr(self.stream, "batch_size", 1) - 1):
+                    print(f"예열 단계 실행 {_+1}/{getattr(self.stream, 'batch_size', 1)-1}")
                     self.stream(image=image_tensor, prompt=new_prompt)
                 
-                # 获取最终输出
-                print("执行最终推理步骤")
-                output = self.stream(image=image_tensor, prompt=new_prompt)
-                print(f"Output type: {type(output)}, ", end="")
-                if isinstance(output, torch.Tensor):
-                    print(f"shape: {output.shape}")
+                print("최종 추론 단계 실행")
+                output_tensor = self.stream(image=image_tensor, prompt=new_prompt)
+
+                # 출력 텐서 처리 및 PIL 이미지로 변환
+                if isinstance(output_tensor, torch.Tensor):
+                    print(f"텐서 출력을 PIL 이미지로 변환, 형태: {output_tensor.shape}")
                     
-                    # 检查输出张量是否有效
-                    has_nan = torch.isnan(output).any().item()
-                    has_inf = torch.isinf(output).any().item()
-                    if has_nan or has_inf:
-                        print(f"警告：输出张量包含无效值: NaN={has_nan}, Inf={has_inf}")
-                        # 修复无效值
-                        output = torch.nan_to_num(output, nan=0.0, posinf=1.0, neginf=-1.0)
-                        print("已修复无效值")
+                    # 배치 차원 제거
+                    if output_tensor.dim() == 4:  # [batch, channel, height, width]
+                        output_tensor = output_tensor.squeeze(0)  # 배치 차원 제거
                     
-                    # 检查输出张量值范围
-                    min_val = output.min().item()
-                    max_val = output.max().item()
-                    mean_val = output.mean().item()
-                    print(f"张量值范围: 最小={min_val:.4f}, 最大={max_val:.4f}, 平均={mean_val:.4f}")
+                    # 값 범위를 [0,1]로 클램핑하고 CPU로 이동
+                    output_tensor = output_tensor.clamp(0, 1).cpu().float()
                     
-                    # 检查张量是否过于接近0（全黑）
-                    is_black = abs(mean_val) < 0.01
-                    if is_black:
-                        print("警告：输出张量接近全黑，创建替代输出")
-                        # 创建替代的彩色输出
-                        output = torch.zeros_like(output)
-                        h, w = output.shape[2], output.shape[3]
-                        for y in range(h):
-                            for x in range(w):
-                                if x < w/3:
-                                    output[0, 0, y, x] = 0.8  # 红色区域
-                                elif x < 2*w/3:
-                                    output[0, 1, y, x] = 0.8  # 绿色区域
-                                else:
-                                    output[0, 2, y, x] = 0.8  # 蓝色区域
+                    # PIL 이미지로 변환
+                    if output_tensor.shape[0] == 3:  # [channel, height, width]
+                        output_array = output_tensor.permute(1, 2, 0).numpy()  # [height, width, channel]
+                        output_array = (output_array * 255).astype(np.uint8)
+                        output_image = Image.fromarray(output_array)
+                        print(f"PIL 이미지로 변환 성공, 크기: {output_image.size}, 모드: {output_image.mode}")
+                        
+                        # RGB 모드 확인
+                        if output_image.mode != "RGB":
+                            print(f"이미지 모드를 {output_image.mode}에서 RGB로 변환")
+                            output_image = output_image.convert("RGB")
+                        
+                        # 출력 이미지 RGB 값 분석
+                        arr_output = np.array(output_image)
+                        print(f"출력 이미지 평균 RGB 값: R={arr_output[:,:,0].mean():.2f}, G={arr_output[:,:,1].mean():.2f}, B={arr_output[:,:,2].mean():.2f}")
+                        
+                        # 디버그 출력 저장
+                        try:
+                            output_image.save("debug_final_output.png")
+                            print("최종 출력을 debug_final_output.png에 저장")
+                        except Exception as e:
+                            print(f"디버그 최종 출력 저장 실패: {e}")
+                        
+                        return output_image
+                        
+                    else:
+                        print(f"예상치 못한 텐서 형태: {output_tensor.shape}")
+                        # 폴백: 테스트 이미지 생성
+                        fallback_image = Image.new("RGB", (512, 512), (0, 0, 255))  # 파란색 테스트 이미지
+                        try:
+                            from PIL import ImageDraw
+                            draw = ImageDraw.Draw(fallback_image)
+                            draw.text((100, 100), "형태 오류", fill=(255, 255, 255))
+                        except Exception:
+                            pass
+                        return fallback_image
+                        
                 else:
-                    print(f"PIL image size: {output.size}")
-                
-                # 尝试保存输出作为调试
-                try:
-                    if isinstance(output, torch.Tensor):
-                        # 转换张量为PIL图像并保存
-                        debug_output = output.clone().cpu()
-                        if debug_output.dim() == 4:
-                            debug_output = debug_output.squeeze(0)
-                        debug_output = debug_output.clamp(0, 1).permute(1, 2, 0).numpy()
-                        debug_output = (debug_output * 255).astype(np.uint8)
-                        debug_image = Image.fromarray(debug_output)
-                        debug_image.save("debug_output.png")
-                        print("保存输出到debug_output.png")
-                    elif isinstance(output, Image.Image):
-                        output.save("debug_output.png")
-                        print("保存PIL输出到debug_output.png")
-                except Exception as e:
-                    print(f"保存调试输出失败: {e}")
-                
-                return output
-                
+                    # 이미 PIL 이미지인 경우
+                    print(f"출력이 이미 PIL 이미지, 크기: {output_tensor.size}, 모드: {output_tensor.mode}")
+                    if output_tensor.mode != "RGB":
+                        output_tensor = output_tensor.convert("RGB")
+                    return output_tensor
+
             except Exception as e:
-                print(f"StreamDiffusion推理过程中出错: {e}")
+                print(f"StreamDiffusion 추론 과정 중 오류: {e}")
                 import traceback
                 traceback.print_exc()
-                raise  # 重新抛出异常以触发外部错误处理
-                
+                raise
+
         except Exception as e:
-            print(f"Error in predict: {e}")
+            print(f"predict에서 오류: {e}")
             import traceback
             traceback.print_exc()
             
-            # 返回一个固定的彩色测试图像作为错误指示，而不是全黑
-            print("返回彩色测试图像作为错误指示")
-            test_tensor = torch.zeros((3, 512, 512), dtype=torch.float32)
-            # 添加一些彩色图案以便于调试
-            test_tensor[0, 100:400, 100:400] = 0.5  # 红色通道
-            test_tensor[1, 150:350, 150:350] = 0.7  # 绿色通道
-            test_tensor[2, 200:300, 200:300] = 0.9  # 蓝色通道
-            return test_tensor
+            # 폴백 테스트 이미지 반환
+            print("폴백 테스트 이미지 생성")
+            fallback_image = Image.new("RGB", (512, 512), (255, 0, 0))  # 빨간색 테스트 이미지
+            try:
+                from PIL import ImageDraw
+                draw = ImageDraw.Draw(fallback_image)
+                draw.rectangle((100, 100, 400, 400), fill=(0, 255, 0))  # 녹색 사각형
+                draw.ellipse((200, 200, 300, 300), fill=(0, 0, 255))  # 파란색 원
+                draw.text((50, 50), "오류 발생", fill=(255, 255, 255))
+            except Exception:
+                pass
+            return fallback_image
+
 
 # Re-add setModelPaths function
 def setModelPaths(base_m: str, tiny_vae_m: str, lcm_lora_m: str, lcm_lora_m2: str = None):
@@ -614,179 +635,178 @@ def loadPipeline(w: int, h: int, seed: int, use_vae: bool, use_lora: bool,
 def runPipeline(input_bytes, new_prompt: str):
     output_io = io.BytesIO()
     if pipeline_object is None:
-        # 如果pipeline为空，返回测试图像
-        print("pipeline为空，返回测试图像")
-        test_image = Image.new("RGB", (512, 512), (255, 100, 100))  # 红色测试图像
-        draw = None
+        # pipeline이 비어있으면 테스트 이미지 반환
+        print("pipeline이 비어있음, 테스트 이미지 반환")
+        test_image = Image.new("RGB", (512, 512), (255, 100, 100))  # 빨간색 테스트 이미지
         try:
             from PIL import ImageDraw
             draw = ImageDraw.Draw(test_image)
-            draw.rectangle((100, 100, 400, 400), fill=(100, 255, 100))  # 绿色矩形
-            draw.ellipse((200, 200, 300, 300), fill=(100, 100, 255))  # 蓝色圆形
+            draw.rectangle((100, 100, 400, 400), fill=(100, 255, 100))  # 녹색 사각형
+            draw.ellipse((200, 200, 300, 300), fill=(100, 100, 255))  # 파란색 원
         except Exception:
             pass
         test_image.save(output_io, format="PNG")
         return output_io.getvalue()
     else:
         try:
-            # 确保提示词不为None
+            # 프롬프트가 None이 아닌지 확인
             if new_prompt is None:
                 new_prompt = ""
                 
             try:
                 input_image = Image.open(io.BytesIO(input_bytes))
-                print(f"成功打开输入图像，大小: {input_image.size}, 模式: {input_image.mode}")
+                print(f"입력 이미지 열기 성공, 크기: {input_image.size}, 모드: {input_image.mode}")
                 
-                # 检查是否启用了绕过模式，如果是，直接返回输入图像，不进行任何处理
+                # RGBA나 다른 모드를 RGB로 변환
+                if input_image.mode != "RGB":
+                    print(f"이미지를 {input_image.mode}에서 RGB로 변환")
+                    if input_image.mode == "RGBA":
+                        # RGBA의 경우 흰색 배경으로 합성
+                        background = Image.new("RGB", input_image.size, (255, 255, 255))
+                        background.paste(input_image, mask=input_image.split()[3] if len(input_image.split()) > 3 else None)
+                        input_image = background
+                    else:
+                        # 다른 모드는 직접 변환
+                        input_image = input_image.convert("RGB")
+                    print(f"RGB 모드로 변환 완료")
+                
+                # 바이패스 모드 확인
                 global bypass_mode
                 if bypass_mode:
-                    print("绕过模式已启用，直接返回原始输入图像")
+                    print("바이패스 모드 활성화, 원본 입력 이미지 직접 반환")
                     
-                    # 分析原始图像的RGB值
+                    # 원본 이미지의 RGB 값 분석
                     arr = np.array(input_image)
-                    print(f"原始图像平均RGB值: R={arr[:,:,0].mean():.2f}, G={arr[:,:,1].mean():.2f}, B={arr[:,:,2].mean():.2f}")
+                    print(f"원본 이미지 평균 RGB 값: R={arr[:,:,0].mean():.2f}, G={arr[:,:,1].mean():.2f}, B={arr[:,:,2].mean():.2f}")
                     
-                    # 重要：直接返回原始输入图像，不做任何转换或处理
+                    # 중요: 원본 입력 이미지를 직접 반환, 변환이나 처리 없이
                     input_bytes_io = io.BytesIO()
                     input_image.save(input_bytes_io, format="PNG")
-                    print(f"绕过模式：直接返回原始图像，数据大小: {input_bytes_io.tell()} 字节")
+                    print(f"바이패스 모드: 원본 이미지 직접 반환, 데이터 크기: {input_bytes_io.tell()} 바이트")
                     return input_bytes_io.getvalue()
                 
-                # 保存输入图像用于调试
+                # 디버그용 입력 이미지 저장
                 try:
                     debug_input = input_image.copy()
                     debug_input.save("debug_input_from_unity.png")
-                    print("保存Unity传入的输入图像")
+                    print("Unity에서 전송된 입력 이미지 저장")
                 except Exception as e:
-                    print(f"保存调试输入失败: {e}")
+                    print(f"디버그 입력 저장 실패: {e}")
                     
             except Exception as e:
-                print(f"打开输入图像失败: {e}")
-                # 创建一个简单的测试图像代替
-                input_image = Image.new("RGB", (512, 512), (0, 255, 0))  # 绿色测试图像
-                print("创建绿色测试图像作为替代")
+                print(f"입력 이미지 열기 실패: {e}")
+                # 간단한 테스트 이미지로 대체
+                input_image = Image.new("RGB", (512, 512), (0, 255, 0))  # 녹색 테스트 이미지
+                print("녹색 테스트 이미지를 대체로 생성")
             
-            # 正常的图像生成流程
-            print("调用pipeline_object.predict处理图像")
+            # 정상적인 이미지 생성 흐름
+            print("pipeline_object.predict 호출하여 이미지 처리")
             
-            # 设置全局标志，避免重复生成测试图像
+            # 중복 생성 방지를 위한 전역 플래그 설정
             global is_in_prediction
             is_in_prediction = True
             
             try:
+                # predict 메서드는 이제 PIL 이미지를 반환
                 output_image = pipeline_object.predict(input_image, new_prompt)
                 is_in_prediction = False
-                print("预测完成")
+                print("예측 완료")
                 
-                # 检查输出类型并适当转换
-                if isinstance(output_image, torch.Tensor):
-                    print(f"Converting tensor output to PIL image, shape: {output_image.shape}")
-                    # 如果是张量，转换为PIL图像
-                    if output_image.dim() == 4:  # [batch, channel, height, width]
-                        output_image = output_image.squeeze(0)  # 去掉批处理维度
+                # output_image는 이미 PIL Image 객체
+                if isinstance(output_image, Image.Image):
+                    print(f"출력이 PIL 이미지, 크기: {output_image.size}, 모드: {output_image.mode}")
                     
-                    # 确保输出是在0-1范围内并且是CPU张量
-                    output_image = output_image.clamp(0, 1).cpu().float()
+                    # RGB 모드 확인
+                    if output_image.mode != "RGB":
+                        print(f"이미지 모드를 {output_image.mode}에서 RGB로 변환")
+                        output_image = output_image.convert("RGB")
                     
-                    # 转换为PIL图像
-                    if output_image.shape[0] == 3:  # [channel, height, width]
-                        output_image = output_image.permute(1, 2, 0).numpy()  # [height, width, channel]
-                        output_image = (output_image * 255).astype(np.uint8)
-                        output_image = Image.fromarray(output_image)
-                        print(f"转换为PIL图像成功，大小: {output_image.size}，模式: {output_image.mode}")
-                    else:
-                        print(f"Unexpected tensor shape: {output_image.shape}")
-                        # 创建一个测试图像
-                        output_image = Image.new("RGB", (512, 512), (0, 0, 255))  # 蓝色测试图像
-                        draw = None
+                    # 출력 이미지의 RGB 값 분석
+                    arr_output = np.array(output_image)
+                    print(f"출력 이미지 평균 RGB 값: R={arr_output[:,:,0].mean():.2f}, G={arr_output[:,:,1].mean():.2f}, B={arr_output[:,:,2].mean():.2f}")
+                    
+                    # 출력 이미지가 너무 어두운지 확인
+                    is_dark = arr_output.mean() < 30  # 평균 밝기가 30/255 미만
+                    if is_dark:
+                        print("경고: 출력 이미지가 너무 어두움, 대체 이미지 생성")
+                        # 대체 컬러 출력 생성
+                        output_image = Image.new("RGB", (512, 512), (128, 128, 128))  # 회색 배경
                         try:
                             from PIL import ImageDraw
                             draw = ImageDraw.Draw(output_image)
-                            draw.text((100, 100), "形状错误", fill=(255, 255, 255))
+                            
+                            # 컬러풀한 줄무늬 그리기
+                            for y in range(0, 512, 16):
+                                color = ((y*3) % 256, (y*5) % 256, (y*7) % 256)
+                                draw.rectangle((0, y, 512, y+8), fill=color)
+                                
+                            # 텍스트 추가
+                            draw.text((100, 240), "생성 실패 - 어두운 이미지 대체", fill=(255, 255, 255))
+                        except Exception as e:
+                            print(f"대체 이미지 그리기 실패: {e}")
+                    
+                    # PNG 형식으로 저장하여 색상 손실 방지
+                    output_image.save(output_io, format="PNG")
+                    print(f"이미지 저장 후 데이터 크기: {output_io.tell()} 바이트")
+                    
+                    # 최종 출력 디버그 저장
+                    try:
+                        output_image.save("debug_final_output.png")
+                        print("최종 출력을 debug_final_output.png에 저장")
+                    except Exception as e:
+                        print(f"디버그 최종 출력 저장 실패: {e}")
+                    
+                    # 출력 데이터 유효성 확인
+                    if output_io.tell() == 0:
+                        print("경고: 출력 데이터 크기가 0, 자주색 테스트 이미지 생성")
+                        test_image = Image.new("RGB", (512, 512), (255, 0, 255))  # 자주색 테스트 이미지
+                        try:
+                            from PIL import ImageDraw
+                            draw = ImageDraw.Draw(test_image)
+                            draw.text((100, 240), "빈 데이터 대체", fill=(255, 255, 255))
                         except Exception:
                             pass
-                        print("创建蓝色测试图像作为替代")
+                        output_io = io.BytesIO()
+                        test_image.save(output_io, format="PNG")
+                    
+                    return output_io.getvalue()
+                
                 else:
-                    print(f"Output is already PIL image, size: {output_image.size}, mode: {output_image.mode}")
-                
-                # 确保图像是RGB模式
-                if output_image.mode != "RGB":
-                    print(f"转换图像模式从 {output_image.mode} 到 RGB")
-                    output_image = output_image.convert("RGB")
-                
-                # 分析输出图像的RGB值
-                arr_output = np.array(output_image)
-                print(f"输出图像平均RGB值: R={arr_output[:,:,0].mean():.2f}, G={arr_output[:,:,1].mean():.2f}, B={arr_output[:,:,2].mean():.2f}")
-                
-                # 检查输出图像是否过于暗/黑
-                is_dark = arr_output.mean() < 30  # 平均亮度低于30/255
-                if is_dark:
-                    print("警告：输出图像过暗，创建替代图像")
-                    # 创建替代的彩色输出
-                    output_image = Image.new("RGB", (512, 512), (0, 0, 0))
-                    try:
-                        # 尝试绘制更复杂的图案
-                        from PIL import ImageDraw
-                        draw = ImageDraw.Draw(output_image)
-                        
-                        # 绘制彩色条纹
-                        for y in range(0, 512, 16):
-                            color = ((y*3) % 256, (y*5) % 256, (y*7) % 256)
-                            draw.rectangle((0, y, 512, y+8), fill=color)
-                            
-                        # 绘制文字
-                        draw.text((100, 240), "生成失败-暗图替代", fill=(255, 255, 255))
-                    except Exception as e:
-                        print(f"绘制替代图像失败: {e}")
-                
-                # 保存为PNG格式而非JPEG，避免进一步的色彩损失
-                output_image.save(output_io, format="PNG")
-                print(f"保存后的图像数据大小: {output_io.tell()} 字节")
-                
-                # 尝试保存一份调试输出
-                try:
-                    output_image.save("debug_final_output.png")
-                    print("保存最终输出到debug_final_output.png")
-                except Exception as e:
-                    print(f"保存调试最终输出失败: {e}")
-                
-                # 检查输出数据是否有效
-                if output_io.tell() == 0:
-                    print("警告：输出数据大小为0，创建紫色测试图像")
-                    test_image = Image.new("RGB", (512, 512), (255, 0, 255))  # 紫色测试图像
+                    print(f"예상치 못한 출력 타입: {type(output_image)}")
+                    # 폴백: 파란색 테스트 이미지
+                    fallback_image = Image.new("RGB", (512, 512), (0, 0, 255))
                     try:
                         from PIL import ImageDraw
-                        draw = ImageDraw.Draw(test_image)
-                        draw.text((100, 240), "空数据替代", fill=(255, 255, 255))
+                        draw = ImageDraw.Draw(fallback_image)
+                        draw.text((100, 240), "타입 오류", fill=(255, 255, 255))
                     except Exception:
                         pass
-                    output_io = io.BytesIO()
-                    test_image.save(output_io, format="PNG")
-                
-                return output_io.getvalue()
+                    fallback_image.save(output_io, format="PNG")
+                    return output_io.getvalue()
+                    
             except Exception as e:
                 is_in_prediction = False
-                print(f"处理过程中出错: {e}")
+                print(f"처리 중 오류: {e}")
                 import traceback
                 traceback.print_exc()
-                raise  # 重新抛出异常以触发外部处理
+                raise  # 외부 처리를 위해 예외 다시 발생
                 
         except Exception as e:
-            print(f"Error in runPipeline: {e}")
+            print(f"runPipeline에서 오류: {e}")
             import traceback
             traceback.print_exc()
             
-            # 创建橙色测试图像作为错误指示
-            test_image = Image.new("RGB", (512, 512), (255, 165, 0))  # 橙色测试图像
+            # 오류 표시용 주황색 테스트 이미지 생성
+            test_image = Image.new("RGB", (512, 512), (255, 165, 0))  # 주황색 테스트 이미지
             try:
                 from PIL import ImageDraw
                 draw = ImageDraw.Draw(test_image)
-                draw.text((100, 240), f"错误: {str(e)[:50]}", fill=(0, 0, 0))
+                draw.text((100, 240), f"오류: {str(e)[:50]}", fill=(0, 0, 0))
             except Exception:
                 pass
             test_io = io.BytesIO()
             test_image.save(test_io, format="PNG")
-            print("返回橙色测试图像作为错误替代")
+            print("오류 대체로 주황색 테스트 이미지 반환")
             return test_io.getvalue()
 
 def processData(client_socket, data):
