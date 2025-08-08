@@ -1,4 +1,4 @@
-/*//#define PAINT_IN_2D
+//#define PAINT_IN_2D
 
 using System.Collections;
 using System.Collections.Generic;
@@ -27,12 +27,12 @@ public class TestStreamUI : MonoBehaviour
     public bool _continuousGeneration = false; // 是否连续推送数据到StreamDiffusion
     [Tooltip("连续生成的时间间隔(秒)")]
     public float _generationInterval = 0.5f; // 生成间隔，单位秒
-    
+
     [Header("绕过模式设置")]
     [Tooltip("启用后将直接返回输入图像，不经过AI处理")]
     public bool _bypassMode = false; // 是否启用绕过模式
     public Toggle _bypassModeToggle; // 绕过模式的UI切换控件
-    
+
     private WebCamTexture _webcamTexture = null;
     private Texture2D _inputTexture = null;
     private Texture _originalInputTexture = null;
@@ -45,7 +45,7 @@ public class TestStreamUI : MonoBehaviour
     public void StartWebcam()
     {
         if (_usePaintTexture) return; // 如果使用绘制模式，不启动网络摄像头
-        
+
         WebCamDevice[] devices = WebCamTexture.devices;
         if (_webcamTexture != null || devices.Length == 0) return;
 
@@ -54,11 +54,11 @@ public class TestStreamUI : MonoBehaviour
         _webcamTexture.Play();
         StartCoroutine(UpdateWebcamData());
     }
-    
+
     public void StartStreamDiff()
     {
         _startButton.interactable = false;
-        
+
         // 将绕过模式设置传递给StreamDiffusionClient
         if (_stream != null) _stream._bypassMode = _bypassMode;
         if (_stream.isValid() && !_stream.isRunning()) _stream.LoadPipeline();
@@ -76,7 +76,7 @@ public class TestStreamUI : MonoBehaviour
             _stream.AdvancePipeline(_inputTexture, _promptInput.text);
         }
     }
-    
+
     // 连续生成协程
     private IEnumerator ContinuousGenerationRoutine()
     {
@@ -90,18 +90,18 @@ public class TestStreamUI : MonoBehaviour
                 if (_usePaintTexture && _paintableTexture != null)
                     UpdatePaintTexture();
 #endif
-                
+
                 // 推送当前数据
                 _stream.AdvancePipeline(_inputTexture, _promptInput.text);
                 Debug.Log("已推送数据进行生成");
             }
-            
+
             // 等待指定时间
             yield return new WaitForSeconds(_generationInterval);
         }
         Debug.Log("停止连续生成模式");
     }
-    
+
     // 新增方法：更新绘制的纹理
     private void UpdatePaintTexture()
     {
@@ -178,14 +178,14 @@ public class TestStreamUI : MonoBehaviour
     void Start()
     {
         _originalInputTexture = _inputMaterial.mainTexture;
-        
+
         // 初始化绕过模式Toggle
         if (_bypassModeToggle != null)
         {
             _bypassModeToggle.isOn = _bypassMode;
             _bypassModeToggle.onValueChanged.AddListener(ToggleBypassMode);
         }
-        
+
         if (_usePaintTexture)
         {
 #if PAINT_IN_2D
@@ -229,7 +229,7 @@ public class TestStreamUI : MonoBehaviour
         if (_continuousGeneration)
             _continuousGenerationCoroutine = StartCoroutine(ContinuousGenerationRoutine());
     }
-    
+
     // 定期更新绘制的纹理
     private IEnumerator UpdatePaintTextureRoutine()
     {
@@ -263,11 +263,11 @@ public class TestStreamUI : MonoBehaviour
                     _continuousGenerationCoroutine = null;
                 }
             }
-            
+
             // 更新状态记录
             _previousContinuousGeneration = _continuousGeneration;
         }
-        
+
         if (_stream.isRunning())
         {
             _startButton.GetComponentInChildren<Text>().text = "Pipeline Loaded";
@@ -287,12 +287,12 @@ public class TestStreamUI : MonoBehaviour
     {
         if (_webcamTexture != null) _webcamTexture.Stop();
         _inputMaterial.mainTexture = _originalInputTexture;
-        
+
         if (_paintTexture != null)
         {
             Destroy(_paintTexture);
         }
-        
+
         // 停止连续生成协程
         if (_continuousGenerationCoroutine != null)
         {
@@ -358,147 +358,8 @@ public class TestStreamUI : MonoBehaviour
         {
             _stream._bypassMode = _bypassMode;
             Debug.Log($"绕过模式已{(_bypassMode ? "启用" : "禁用")}");
-            
+
             // 如果已经加载了Pipeline，则重新加载以应用新设置
-            if (_stream.isRunning())
-            {
-                _startButton.interactable = false;
-                _stream.LoadPipeline();
-            }
-        }
-    }
-}
-*/
-
-// TestStreamUI.cs
-
-using System.Collections;
-using System.Collections.Generic;
-using UnityEngine;
-using UnityEngine.UI;
-
-public class TestStreamUI : MonoBehaviour
-{
-    public StreamDiffusionClient _stream;
-    public Material _inputMaterial;
-    public Button _startButton;
-    public InputField _promptInput;
-
-    [Header("드로잉 설정")]
-    public DrawingCanvas drawingCanvas;
-
-    [Header("연속 생성 설정")]
-    public bool _continuousGeneration = false;
-    public float _generationInterval = 0.5f;
-
-    public Toggle _bypassModeToggle;
-    public bool _bypassMode = false;
-
-    private Texture2D _inputTexture = null;
-    private Texture _originalInputTexture = null;
-    private Coroutine _continuousGenerationCoroutine = null;
-    private bool _previousContinuousGeneration = false;
-    private bool _lastRunningStatus = false;
-
-    public void StartStreamDiff()
-    {
-        _startButton.interactable = false;
-        if (_stream != null) _stream._bypassMode = _bypassMode;
-        if (_stream.isValid() && !_stream.isRunning()) _stream.LoadPipeline();
-    }
-
-    public void UpdateStreamDiff()
-    {
-        if (_stream.isRunning() && !_stream.isGenerating())
-        {
-            UpdateDrawTexture();
-            _stream.AdvancePipeline(_inputTexture, _promptInput.text);
-        }
-    }
-
-    private IEnumerator ContinuousGenerationRoutine()
-    {
-        while (_continuousGeneration)
-        {
-            UpdateStreamDiff();
-            yield return new WaitForSeconds(_generationInterval);
-        }
-    }
-
-    private void UpdateDrawTexture()
-    {
-        if (drawingCanvas == null) return;
-        Texture2D drawTex = drawingCanvas.GetDrawingTexture();
-        _inputTexture = drawTex;
-
-        if (_inputMaterial != null)
-            _inputMaterial.mainTexture = _inputTexture;
-    }
-
-    void Start()
-    {
-        _originalInputTexture = _inputMaterial.mainTexture;
-
-        if (_bypassModeToggle != null)
-        {
-            _bypassModeToggle.isOn = _bypassMode;
-            _bypassModeToggle.onValueChanged.AddListener(ToggleBypassMode);
-        }
-
-        UpdateDrawTexture();
-
-        _previousContinuousGeneration = _continuousGeneration;
-        if (_continuousGeneration)
-            _continuousGenerationCoroutine = StartCoroutine(ContinuousGenerationRoutine());
-    }
-
-    void Update()
-    {
-        if (_continuousGeneration != _previousContinuousGeneration)
-        {
-            if (_continuousGeneration && _continuousGenerationCoroutine == null)
-                _continuousGenerationCoroutine = StartCoroutine(ContinuousGenerationRoutine());
-            else if (!_continuousGeneration && _continuousGenerationCoroutine != null)
-            {
-                StopCoroutine(_continuousGenerationCoroutine);
-                _continuousGenerationCoroutine = null;
-            }
-            _previousContinuousGeneration = _continuousGeneration;
-        }
-
-        if (_stream.isRunning())
-        {
-            _startButton.GetComponentInChildren<Text>().text = "Pipeline Loaded";
-            if (_lastRunningStatus != _stream.isRunning()) UpdateStreamDiff();
-        }
-        else if (_stream.isPending())
-            _startButton.GetComponentInChildren<Text>().text = "Waiting...";
-        else
-        {
-            _startButton.interactable = _stream.isValid();
-            _startButton.GetComponentInChildren<Text>().text = "Start StreamDiff";
-        }
-        _lastRunningStatus = _stream.isRunning();
-    }
-
-    void OnDestroy()
-    {
-        _inputMaterial.mainTexture = _originalInputTexture;
-        if (_inputTexture != null) Destroy(_inputTexture);
-
-        if (_continuousGenerationCoroutine != null)
-        {
-            StopCoroutine(_continuousGenerationCoroutine);
-            _continuousGenerationCoroutine = null;
-        }
-    }
-
-    public void ToggleBypassMode(bool isOn)
-    {
-        _bypassMode = isOn;
-        if (_stream != null)
-        {
-            _stream._bypassMode = _bypassMode;
             if (_stream.isRunning())
             {
                 _startButton.interactable = false;

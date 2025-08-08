@@ -192,7 +192,6 @@ class Pipeline:
                 'negative_prompt': negative_prompt,
                 'guidance_scale': guidance_scale_value,  # 默认值1.0，与main.py一致
                 'delta': delta_value,
-                'strength': strength_value,
                 'num_inference_steps': 50
             }
             
@@ -227,7 +226,7 @@ class Pipeline:
         try:
             print(f"Input image size: {input_image.size}, mode: {input_image.mode}")
             
-            # RGBA나 다른 모드를 RGB로 변환
+            # 1. 먼저 모든 이미지를 RGB로 변환
             if input_image.mode != "RGB":
                 print(f"Converting image from {input_image.mode} to RGB")
                 if input_image.mode == "RGBA":
@@ -235,17 +234,24 @@ class Pipeline:
                     background = Image.new("RGB", input_image.size, (255, 255, 255))
                     background.paste(input_image, mask=input_image.split()[3] if len(input_image.split()) > 3 else None)
                     input_image = background
+                elif input_image.mode == "L":
+                    # 그레이스케일을 RGB로
+                    input_image = input_image.convert("RGB")
+                elif input_image.mode == "P":
+                    # 팔레트 모드를 RGB로
+                    input_image = input_image.convert("RGB")
                 else:
-                    # 다른 모드는 직접 변환
+                    # 기타 모드도 RGB로 변환
                     input_image = input_image.convert("RGB")
                 print(f"Converted to RGB mode")
 
+            # Transform 정의 (3채널용)
             transform = T.Compose([
                 T.ToTensor(),
                 T.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5])
             ])
 
-            # 디버깅 및 전처리 코드
+            # 디버깅 이미지 저장
             try:
                 input_copy = input_image.copy()
                 input_debug_path = "debug_input.png"
@@ -254,7 +260,18 @@ class Pipeline:
             except Exception as e:
                 print(f"저장 디버그 이미지 실패: {e}")
 
+            # numpy 배열로 변환 (RGB 확인)
             arr_input = np.array(input_image)
+            print(f"Array shape: {arr_input.shape}")  # (height, width, 3) 이어야 함
+            
+            # 채널 수 확인
+            if len(arr_input.shape) == 3 and arr_input.shape[2] == 4:
+                print("WARNING: Still has 4 channels, removing alpha")
+                arr_input = arr_input[:, :, :3]
+            elif len(arr_input.shape) == 2:
+                print("WARNING: Grayscale detected, converting to RGB")
+                arr_input = np.stack([arr_input] * 3, axis=2)
+                
             print(f"입력 이미지 평균 RGB 값: R={arr_input[:,:,0].mean():.2f}, G={arr_input[:,:,1].mean():.2f}, B={arr_input[:,:,2].mean():.2f}")
 
             global bypass_mode, is_linear_space
@@ -272,33 +289,54 @@ class Pipeline:
                             test_array[y, x] = [50, 200, 100]
                         else:
                             test_array[y, x] = [100, 50, 200]
-                input_image = Image.fromarray(test_array)
+                input_image = Image.fromarray(test_array, mode='RGB')  # 명시적으로 RGB 모드 지정
                 arr_input = test_array
 
             # 색공간 처리
             if is_linear_space:
                 print("검색된 선형 색공간 입력, Gamma 공간으로 변환")
+                
+                # 3채널인지 확인
+                if arr_input.shape[2] != 3:
+                    print(f"ERROR: Expected 3 channels, got {arr_input.shape[2]}")
+                    arr_input = arr_input[:, :, :3] if arr_input.shape[2] > 3 else np.stack([arr_input[:, :, 0]] * 3, axis=2)
+                
                 arr_float = arr_input.astype(np.float32) / 255.0
                 arr_gamma = np.power(arr_float, 1/2.2) * 255.0
                 arr_gamma = np.clip(arr_gamma, 0, 255).astype(np.uint8)
-                print(f"변환 후 평균 RGB 값: R={arr_gamma[:,:,0].mean():.2f}, G={arr_gamma[:,:,1].mean():.2f}, B={arr_gamma[:,:,2].mean():.2f}")
-                gamma_image = Image.fromarray(arr_gamma)
                 
-                # gamma_image도 RGB 모드 확인
+                print(f"Gamma array shape: {arr_gamma.shape}")  # 디버그용
+                print(f"변환 후 평균 RGB 값: R={arr_gamma[:,:,0].mean():.2f}, G={arr_gamma[:,:,1].mean():.2f}, B={arr_gamma[:,:,2].mean():.2f}")
+                
+                # PIL Image 생성 시 명시적으로 RGB 모드 지정
+                gamma_image = Image.fromarray(arr_gamma, mode='RGB')
+                
+                # 한 번 더 확인
                 if gamma_image.mode != "RGB":
+                    print(f"WARNING: gamma_image is {gamma_image.mode}, converting to RGB")
                     gamma_image = gamma_image.convert("RGB")
+                
+                print(f"Gamma image mode: {gamma_image.mode}, size: {gamma_image.size}")
                     
                 try:
                     gamma_image.save("debug_gamma_converted.png")
                     print("Gamma 변환 이미지를 debug_gamma_converted.png에 저장")
                 except Exception as e:
                     print(f"Gamma 이미지 저장 실패: {e}")
+                
+                # Transform 적용
                 image_tensor = transform(gamma_image).unsqueeze(0)
             else:
                 print("비선형 공간, 입력 이미지 직접 처리")
+                # 한 번 더 RGB 확인
+                if input_image.mode != "RGB":
+                    print(f"Final check: converting {input_image.mode} to RGB")
+                    input_image = input_image.convert("RGB")
+                
                 image_tensor = transform(input_image).unsqueeze(0)
 
-            # 나머지 코드는 그대로...
+            print(f"Tensor shape after transform: {image_tensor.shape}")  # [1, 3, H, W] 이어야 함
+
             # 장치 및 dtype 일관되게 적용
             if torch.cuda.is_available():
                 image_tensor = image_tensor.to(device="cuda", dtype=torch.float16)
@@ -339,7 +377,7 @@ class Pipeline:
                     if output_tensor.shape[0] == 3:  # [channel, height, width]
                         output_array = output_tensor.permute(1, 2, 0).numpy()  # [height, width, channel]
                         output_array = (output_array * 255).astype(np.uint8)
-                        output_image = Image.fromarray(output_array)
+                        output_image = Image.fromarray(output_array, mode='RGB')  # 명시적으로 RGB 지정
                         print(f"PIL 이미지로 변환 성공, 크기: {output_image.size}, 모드: {output_image.mode}")
                         
                         # RGB 모드 확인
@@ -656,19 +694,6 @@ def runPipeline(input_bytes, new_prompt: str):
             try:
                 input_image = Image.open(io.BytesIO(input_bytes))
                 print(f"입력 이미지 열기 성공, 크기: {input_image.size}, 모드: {input_image.mode}")
-                
-                # RGBA나 다른 모드를 RGB로 변환
-                if input_image.mode != "RGB":
-                    print(f"이미지를 {input_image.mode}에서 RGB로 변환")
-                    if input_image.mode == "RGBA":
-                        # RGBA의 경우 흰색 배경으로 합성
-                        background = Image.new("RGB", input_image.size, (255, 255, 255))
-                        background.paste(input_image, mask=input_image.split()[3] if len(input_image.split()) > 3 else None)
-                        input_image = background
-                    else:
-                        # 다른 모드는 직접 변환
-                        input_image = input_image.convert("RGB")
-                    print(f"RGB 모드로 변환 완료")
                 
                 # 바이패스 모드 확인
                 global bypass_mode

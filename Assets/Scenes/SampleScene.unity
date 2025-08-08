@@ -790,7 +790,7 @@ Camera:
   field of view: 60
   orthographic: 0
   orthographic size: 5
-  m_Depth: -2
+  m_Depth: -1
   m_CullingMask:
     serializedVersion: 2
     m_Bits: 4294967295
@@ -813,7 +813,7 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 963194225}
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0, y: 0, z: -2}
+  m_LocalPosition: {x: 0, y: 0, z: -2.71}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -908,11 +908,10 @@ MonoBehaviour:
   _inputMaterial: {fileID: 2100000, guid: 4267dda822cb2f644b8f22000204f564, type: 2}
   _startButton: {fileID: 381118695}
   _promptInput: {fileID: 1493324038}
-  drawingCanvas: {fileID: 0}
   _continuousGeneration: 0
   _generationInterval: 0.5
-  _bypassModeToggle: {fileID: 0}
   _bypassMode: 0
+  _bypassModeToggle: {fileID: 0}
 --- !u!1 &1215471198
 GameObject:
   m_ObjectHideFlags: 0
